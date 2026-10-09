@@ -22,9 +22,10 @@ Windows 桌面鼠标手势 / 鼠标增强工具。项目名 `mouselnk-plus`（�
 ## Start here
 
 1. `TODO.md` —— 当前任务与进度，接手时先看这个
-2. `AGENTS.md` —— 项目规则、复现的法律与工程边界
-3. `CONTEXT.md` —— 已核实的领域事实、术语、本机取证证据、硬约束与已知失效模式
-4. `temp/AGENTS.md` —— 往 `temp/` 放临时材料之前先读
+2. `docs/execution-plan.md` —— **执行总纲**：工作原则、技术选型结论、标准流程、阶段任务地图、验证矩阵与风险登记
+3. `AGENTS.md` —— 项目规则、依赖与技术选型纪律、复现的法律与工程边界
+4. `CONTEXT.md` —— 已核实的领域事实、术语、本机取证证据、硬约束与已知失效模式
+5. `temp/AGENTS.md` —— 往 `temp/` 放临时材料之前先读
 
 ## Development
 

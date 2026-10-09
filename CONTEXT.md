@@ -186,6 +186,18 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 - **语义验证的范围**（已实现）：SchemaVersion 上下界、手势参数范围（`StartDistance ≥ 0`、`TimeoutMs > 0`、`Sensitivity ∈ [0,100]`、`TraceWidth ≥ 1`、`FontSize ≥ 1`）、模板 Id 非空且不重复且点数 ≥ 2 且坐标有限、绑定引用的模板必须存在（`WheelSwitchUp`/`WheelSwitchDown` 作为伪手势例外）、动作必须有 `Type`、应用规则必须有 `Programs`、`Excludes` 无空串。
 - **文件读取容忍 UTF-8 BOM**（部分编辑器会加，不去掉会导致解析失败）。
 
+### 技术选型调研结论（2026-10-09，完整对比见 `docs/execution-plan.md` 第 2 节）
+
+以下**事实**是选型依据，无论最终怎么选都成立：
+
+- **Windows 自带 OCR 可用**：`Windows.Media.Ocr` 的 `OcrEngine` 在本机**以普通非 MSIX 进程**成功创建并识别（1000×140 图 31 ms，中英数混排全对）。MS 文档把 `OcrEngine` 列在「需要 package identity」清单里，所以这是**文档层面「不受支持」但实际可用**——必须按「探测可用则用、否则降级」实现，不能假设一定成功。语言数据在系统侧（本机 zh-cn 为 2.3 MB），**主程序零字节增量**。ONNX Runtime + PP-OCR 路线约 24 MB（ORT 17.6 MB + tiny det/rec ≈ 6.2 MB），正是 Aitiy 空闲内存 130–176 MB 的来源。
+- **BCrypt/CNG 可以替代作者规格点名的 LibTomCrypt + LibTomMath**：BCrypt 覆盖 MD5/SHA-1/SHA-256（Vista+），零字节增量、零许可证登记；LibTomMath 本项目根本不需要（其官方 README 称 MPI 仅在构建 binaries 时需要）。更新包验签可用 CNG 验签或 `WinVerifyTrust`。
+- **miniz 不可替代**（只要必须读任意 `.zip`）：Windows 的 Compression API 只有 MSZIP/XPRESS/XPRESS_HUFF/LZMS，**没有 DEFLATE**，解不了标准 zip；ntdll 里的 raw DEFLATE/ZLIB 仅 Win11 24H2+ 且未公开。**除非**把可选组件包格式改由我方定义（MSZIP/LZMS），那样可以完全不用 miniz。
+- **原生 Windows 的单文件程序没有可用的自动更新轮子**：唯一原生候选 WinSparkle 单 DLL 就是 2.2–2.8 MB（大于 MouseInc 整包 1.19 MiB）且需多带一个文件；Velopack / Squirrel.Windows / Google Omaha 都以「安装器 + 目录布局」为前提，与单文件 portable **架构层面互斥**（Squirrel 已停滞、Omaha 已归档）。
+- **崩溃上报同理没有合适轮子**：Crashpad 必须随包一个 handler 子进程且构建不走 CMake；sentry-native 默认指向云端且同样要额外进程；WER LocalDumps 需管理员写 HKLM，便携场景不可用。可用系统自带的 dbghelp `MiniDumpWriteDump`（延迟加载，空闲零开销）。
+- **WebView2 两个常见误解要纠正**：① 对非 UWP 应用，**默认 user data 目录就在 exe 旁边**（`{exe文件名}.WebView2`），不是系统目录——真正的硬伤是 exe 目录不可写时会失败、以及会在程序旁留一个体积不小的缓存目录；解法是显式传 `userDataFolder`（便携模式用 exe 同目录 + 可写性探测，回落 `%LOCALAPPDATA%`），注意环境变量 `WEBVIEW2_USER_DATA_FOLDER` 与注册表策略会**覆盖**程序传入值。② **不需要 Mongoose、不需要起回环服务**：用 `SetVirtualHostNameToFolderMapping` 把本地 `ui/` 目录映射为虚拟域名即可离线加载。另外 Fixed Version 运行时对便携程序不可接受（包体 +250 MB、需改 ACL、不能从网络路径运行），应走 Evergreen + 启动探测 + 明确告知。
+- **`WebView2LoaderStatic.lib`（静态 loader）要在 CMake 下手动集成**（解 nupkg 取 `build/native/x64/WebView2LoaderStatic.lib`，JUCE/wxWidgets/Tauri 都走这条路，官方给的是 MSBuild 属性，我们用不上）。它是保住单文件的关键，**但与静态 CRT `/MT` 的兼容性无官方说明，必须真机构建验证**。
+
 ## 作者的设计取向与稳定性来源（调研结论）
 
 四份专题调研（`temp/research/mouseinc-deep-dive.md`、`aitiy-deep-dive.md`、`community-voice.md`、`stability-and-design.md`）与综述（`design-thinking-synthesis.md`）得出的结论。**这些解释了我们为什么要守住「轻量」，不是背景故事。**
@@ -333,7 +345,7 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 ## 待确认
 
 1. **正式产品名称、图标、界面风格、服务地址**：作者明确要求「使用自己的软件名称、图标、界面和服务地址」。`mouselnk-plus` 只是仓库/目录名，不可直接当产品名对外。
-2. **OCR 引擎的具体选型**：规格只给了约束——「接入可部署的本地引擎或用户自己的服务」「联网时明确图片发送目的地」「不调用原软件作者的接口」。具体接哪一个（本地推理引擎还是自有服务）未定，且受体积预算约束。
+2. **OCR 引擎的最终选型**：调研已给出方案（主用系统 OCR，高质量需求走按需下载的可选组件），**等 owner 确认**。完整对比见 `docs/execution-plan.md` 第 2.2 节。
 3. **作者原文是否还有被截断的尾段**：owner 提供的消息在「不要只给架构、伪代码或空 TODO。」处被对话界面截断。该句读起来是「十七、验证与交付」的自然收尾，但若原文其后还有内容，需要补发。
 4. **是否实现 MouseInc.json 一次性导入**：内部 schema 已按作者规格定下（ADR-0002），两者不兼容。既有 `MouseInc.json`（36 条模板 + 应用规则 + 边缘/触发角/热键表）可作为**一次性导入源**帮用户迁移，但这是可选项，未排期。
 5. **便携模式的判定方式**：已解决 —— **exe 同目录存在名为 `mouselnk-plus.portable` 的标记文件即进入便携模式**，配置写到 exe 同目录的 `mouselnk-plus.json`；否则配置写到 `%APPDATA%\mouselnk-plus\config.json`。选择「显式标记文件」而不是「目录可写就便携」的原因：后者会让行为随安装位置漂移（装在 Program Files 与放在 U 盘表现不同），用户无法预期。已实测验证两种模式各自的落点。
