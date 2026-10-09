@@ -341,11 +341,12 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 
 - `docs/adr/0001-toolchain-and-build-system.md` —— 编译工具链与工程系统选型（MSVC v143 + CMake）。
 - `docs/adr/0002-config-schema.md` —— 内部配置 schema 采用作者规格的新格式，MouseInc.json 仅作一次性导入源。
+- `docs/adr/0003-dependency-strategy.md` —— 依赖策略：系统自带优先、最少第三方；本工程采用 MIT 许可证。
 
 ## 待确认
 
 1. **正式产品名称、图标、界面风格、服务地址**：作者明确要求「使用自己的软件名称、图标、界面和服务地址」。`mouselnk-plus` 只是仓库/目录名，不可直接当产品名对外。
-2. **OCR 引擎的最终选型**：调研已给出方案（主用系统 OCR，高质量需求走按需下载的可选组件），**等 owner 确认**。完整对比见 `docs/execution-plan.md` 第 2.2 节。
+2. **OCR 引擎的最终选型**：**已确认（2026-10-09）** —— 主用 Windows 系统 OCR（`Windows.Media.Ocr`，探测可用则用、否则降级），高质量需求走按需下载的可选组件（PP-OCRv6 tiny，独立进程）。理由与对比见 `docs/execution-plan.md` 第 2.2 节。
 3. **作者原文是否还有被截断的尾段**：owner 提供的消息在「不要只给架构、伪代码或空 TODO。」处被对话界面截断。该句读起来是「十七、验证与交付」的自然收尾，但若原文其后还有内容，需要补发。
 4. **是否实现 MouseInc.json 一次性导入**：内部 schema 已按作者规格定下（ADR-0002），两者不兼容。既有 `MouseInc.json`（36 条模板 + 应用规则 + 边缘/触发角/热键表）可作为**一次性导入源**帮用户迁移，但这是可选项，未排期。
 5. **便携模式的判定方式**：已解决 —— **exe 同目录存在名为 `mouselnk-plus.portable` 的标记文件即进入便携模式**，配置写到 exe 同目录的 `mouselnk-plus.json`；否则配置写到 `%APPDATA%\mouselnk-plus\config.json`。选择「显式标记文件」而不是「目录可写就便携」的原因：后者会让行为随安装位置漂移（装在 Program Files 与放在 U 盘表现不同），用户无法预期。已实测验证两种模式各自的落点。
