@@ -1,0 +1,48 @@
+// 资源脚本：图标、manifest、版本信息。
+// 注意：本文件只用 ASCII 文本，避免 rc.exe 在非 UTF-8 代码页下把中文写坏。
+
+#include "resource.h"
+
+IDI_APP         ICON    "..\\assets\\app.ico"
+IDI_APP_PAUSED  ICON    "..\\assets\\app_paused.ico"
+
+// 默认配置 JSON（作者规格要求用 .rc 嵌入默认 JSON）。
+// RCDATA 按字节原样嵌入，不做代码页转换，因此文件里的 UTF-8 中文能保持完整。
+IDR_DEFAULT_CONFIG  RCDATA  "..\\resources\\default-config.json"
+
+// manifest 不在这里嵌入：作为源文件交给 CMake，由链接器合并进唯一的
+// MANIFEST 资源。若在此处再写一次 "1 24 app.manifest"，会与链接器自动
+// 生成的那份冲突（CVT1100 资源重复）。
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     0,1,0,0
+ PRODUCTVERSION  0,1,0,0
+ FILEFLAGSMASK   0x3fL
+#ifdef _DEBUG
+ FILEFLAGS       0x1L
+#else
+ FILEFLAGS       0x0L
+#endif
+ FILEOS          0x40004L
+ FILETYPE        0x1L
+ FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName",      "mouselnk-plus"
+            VALUE "FileDescription",  "mouselnk-plus"
+            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "InternalName",     "mouselnk-plus"
+            VALUE "LegalCopyright",   "mouselnk-plus"
+            VALUE "OriginalFilename", "mouselnk-plus.exe"
+            VALUE "ProductName",      "mouselnk-plus"
+            VALUE "ProductVersion",   "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END

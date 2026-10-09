@@ -1,0 +1,202 @@
+{
+  "SchemaVersion": 1,
+  "General": {
+    "Language": "zh-CN",
+    "StartOnBoot": false,
+    "IgnoreFullScreen": true,
+    "ShowTrayIcon": true
+  },
+  "MouseGesture": {
+    "Enabled": true,
+    "StartDistance": 5,
+    "TimeoutMs": 1000,
+    "Sensitivity": 50,
+    "DrawTrace": true,
+    "DrawResult": true,
+    "TraceWidth": 3,
+    "TraceArrow": true,
+    "DrawColor": "#E47542",
+    "FailColor": "#CAD0D3",
+    "RandColor": false,
+    "FontSize": 26,
+    "RestoreOnFailure": false
+  },
+  "Gestures": [
+    { "Id": "UP", "Points": [[0, 100], [0, 0]] },
+    { "Id": "DOWN", "Points": [[0, 0], [0, 100]] },
+    { "Id": "LEFT", "Points": [[100, 0], [0, 0]] },
+    { "Id": "RIGHT", "Points": [[0, 0], [100, 0]] },
+    { "Id": "/ UP", "Points": [[0, 100], [100, 0]] },
+    { "Id": "/ DOWN", "Points": [[0, 0], [100, 100]] },
+    { "Id": "DOWN-RIGHT", "Points": [[0, 0], [0, 100], [100, 100]] },
+    { "Id": "SQUARE", "Points": [[0, 0], [0, 100], [100, 100], [100, 0], [5, 0]] },
+    { "Id": "S", "Points": [[70, 0], [0, 0], [0, 50], [70, 50], [70, 100], [-5, 100]] },
+    { "Id": "W", "Points": [[0, 0], [25, 100], [50, 0], [75, 100], [100, -5]] }
+  ],
+  "MatchGlobal": [
+    {
+      "GestureId": "UP",
+      "Name": "复制",
+      "Enabled": true,
+      "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+C" }]
+    },
+    {
+      "GestureId": "DOWN",
+      "Name": "粘贴",
+      "Enabled": true,
+      "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+V" }]
+    },
+    {
+      "GestureId": "LEFT",
+      "Name": "后退",
+      "Enabled": true,
+      "Actions": [{ "Type": "SendKeys", "Keys": "Back" }]
+    },
+    {
+      "GestureId": "RIGHT",
+      "Name": "前进",
+      "Enabled": true,
+      "Actions": [{ "Type": "SendKeys", "Keys": "Forward" }]
+    },
+    {
+      "GestureId": "DOWN-RIGHT",
+      "Name": "关闭窗口",
+      "Enabled": true,
+      "Actions": [{ "Type": "Window", "Command": "Close" }]
+    },
+    {
+      "GestureId": "/ UP",
+      "Name": "窗口最大化/还原",
+      "Enabled": true,
+      "Actions": [{ "Type": "Window", "Command": "ToggleMaximized" }]
+    },
+    {
+      "GestureId": "/ DOWN",
+      "Name": "窗口最小化",
+      "Enabled": true,
+      "Actions": [{ "Type": "Window", "Command": "Minimize" }]
+    },
+    {
+      "GestureId": "SQUARE",
+      "Name": "截图贴图",
+      "Enabled": true,
+      "Actions": [{ "Type": "Screenshot", "Output": "Stick" }]
+    },
+    {
+      "GestureId": "S",
+      "Name": "搜索选中文字",
+      "Enabled": true,
+      "Actions": [
+        { "Type": "GetSelectedText" },
+        { "Type": "Execute", "Target": "https://www.bing.com/search?q=%tempstr%" }
+      ]
+    },
+    {
+      "GestureId": "WheelSwitchUp",
+      "Name": "切换标签页-上一个",
+      "Enabled": true,
+      "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+PgUp" }]
+    },
+    {
+      "GestureId": "WheelSwitchDown",
+      "Name": "切换标签页-下一个",
+      "Enabled": true,
+      "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+PgDn" }]
+    },
+    {
+      "GestureId": "W",
+      "Name": "退出程序",
+      "Enabled": false,
+      "Actions": [{ "Type": "Internal", "Command": "Exit" }]
+    }
+  ],
+  "MatchCustom": [
+    {
+      "Name": "浏览器",
+      "Programs": [
+        "Chrome.exe",
+        "Firefox.exe",
+        "msedge.exe",
+        "iexplore.exe",
+        "opera.exe",
+        "qqbrowser.exe"
+      ],
+      "IgnoreGlobal": false,
+      "Bindings": [
+        {
+          "GestureId": "LEFT",
+          "Name": "关闭标签",
+          "Enabled": true,
+          "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+W" }]
+        }
+      ]
+    }
+  ],
+  "Excludes": [],
+  "Hotkeys": {
+    "Bindings": [
+      {
+        "Keys": "Ctrl+Alt+M",
+        "Name": "暂停/恢复",
+        "Enabled": true,
+        "Actions": [{ "Type": "Internal", "Command": "TogglePause" }]
+      }
+    ]
+  },
+  "WheelEdge": {
+    "Enabled": true,
+    "Left": {
+      "Name": "音量调节",
+      "Enabled": true,
+      "ScrollUp": { "Actions": [{ "Type": "Volume", "Command": "Up" }] },
+      "ScrollDown": { "Actions": [{ "Type": "Volume", "Command": "Down" }] },
+      "Click": { "Actions": [{ "Type": "Volume", "Command": "Mute" }] }
+    },
+    "Top": {
+      "Name": "标签页切换",
+      "Enabled": true,
+      "ScrollUp": { "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+PgUp" }] },
+      "ScrollDown": { "Actions": [{ "Type": "SendKeys", "Keys": "Ctrl+PgDn" }] },
+      "Click": { "Actions": [] }
+    },
+    "Right": { "Name": "", "Enabled": false, "ScrollUp": { "Actions": [] }, "ScrollDown": { "Actions": [] }, "Click": { "Actions": [] } },
+    "Bottom": { "Name": "", "Enabled": false, "ScrollUp": { "Actions": [] }, "ScrollDown": { "Actions": [] }, "Click": { "Actions": [] } }
+  },
+  "HotCorner": {
+    "Enabled": false,
+    "ResetDistance": 50,
+    "DwellMs": 0,
+    "TopLeft": { "Name": "", "Enabled": false, "Actions": [] },
+    "TopRight": { "Name": "", "Enabled": false, "Actions": [] },
+    "BottomLeft": { "Name": "", "Enabled": false, "Actions": [] },
+    "BottomRight": { "Name": "", "Enabled": false, "Actions": [] }
+  },
+  "ClipboardMenu": {
+    "Enabled": true,
+    "DoubleCopyIntervalMs": 500,
+    "Items": [
+      {
+        "Name": "搜索",
+        "Enabled": true,
+        "Actions": [{ "Type": "Execute", "Target": "https://www.bing.com/search?q=%clipboard%" }]
+      },
+      { "Separator": true },
+      {
+        "Name": "Base64 解码",
+        "Enabled": true,
+        "Actions": [{ "Type": "Text", "Command": "Base64Decode" }]
+      },
+      {
+        "Name": "Base64 编码",
+        "Enabled": true,
+        "Actions": [{ "Type": "Text", "Command": "Base64Encode" }]
+      },
+      { "Separator": true },
+      {
+        "Name": "退出程序",
+        "Enabled": false,
+        "Actions": [{ "Type": "Internal", "Command": "Exit" }]
+      }
+    ]
+  }
+}
