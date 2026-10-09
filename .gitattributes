@@ -1,0 +1,12 @@
+# 统一换行符处理，避免不同机器上产生无意义的 diff 噪声。
+# 仓库内统一存 LF；二进制资源不做任何转换。
+* text=auto
+
+*.ico binary
+*.png binary
+*.bmp binary
+*.wav binary
+
+# Windows 批处理必须保持 CRLF，否则 cmd.exe 解析会出错。
+*.bat text eol=crlf
+*.cmd text eol=crlf
