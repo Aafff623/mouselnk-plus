@@ -1,0 +1,48 @@
+# TTA local workspace payloads
+/temp/*
+!/temp/README.md
+!/temp/AGENTS.md
+
+# Project-local MCP configuration; never commit runtime endpoints or credentials
+/.agents/mcp.json
+/.mcp.json
+/.cursor/mcp.json
+/.vscode/mcp.json
+
+# Common local secrets and generated output
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+
+# ---- C++ / CMake build output ----
+/build*/
+/out/
+cmake-build-*/
+CMakeUserPresets.json
+
+# ---- MSVC / Visual Studio ----
+/.vs/
+*.vcxproj.user
+*.VC.db
+*.VC.VC.opendb
+*.suo
+*.user
+*.aps
+*.pdb
+*.ilk
+*.idb
+*.exp
+*.log.orig
+
+# ---- Compiled artifacts (not tracked; rebuild from source) ----
+*.exe
+*.dll
+*.lib
+*.obj
+*.res
+!**/testdata/**/*.exe
+
+# ---- local index / tooling caches ----
+/.codegraph/
