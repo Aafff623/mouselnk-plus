@@ -86,6 +86,8 @@ target_link_libraries(mouselnk-plus PRIVATE
 )
 
 # 图标与默认配置都被 .rc 引用，改它们时要触发重新编译资源，否则会静默沿用旧内容。
+# 实测本机制在 Ninja 生成器下生效：改图标后构建输出会出现资源编译步骤（如 [2/2]）。
+# 判断资源是否真的重编要看构建的步骤数，不能只看最后一行 Linking。
 set_property(SOURCE src/app.rc APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/app.ico;${CMAKE_CURRENT_SOURCE_DIR}/assets/app_paused.ico;${CMAKE_CURRENT_SOURCE_DIR}/resources/default-config.json"
 )
