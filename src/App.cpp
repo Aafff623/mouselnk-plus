@@ -1,12 +1,19 @@
 #include "App.h"
 
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 #include "Config.h"
+#include "Input.h"
+#include "Log.h"
 #include "resource.h"
 
 namespace {
+
+// 手势超时检测的定时器：50ms 一次足够分辨 1s 量级的停顿超时，又不至于是忙等。
+constexpr UINT_PTR kGestureTimerId = 1;
+constexpr UINT     kGestureTimerMs = 50;
 
 constexpr const wchar_t* kRunKeyPath   = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr const wchar_t* kRunValueName = L"mouselnk-plus";
@@ -189,7 +196,50 @@ CApp::StartResult CApp::Initialize(HINSTANCE instance) {
         ::MessageBoxW(nullptr, ToWide(loaded.message).c_str(), kAppTitle, MB_OK | MB_ICONERROR);
     }
 
+    // 日志放在配置文件同目录（便携模式下即 exe 同目录），便于随程序搬走。
+    const std::filesystem::path cfgPath = config::Store::Instance().Path();
+    logger::Init(std::filesystem::path(cfgPath).parent_path() / L"mouselnk-plus.log");
+    logger::Info("mouselnk-plus 启动；版本 " + std::string("0.1.0"));
+    logger::Info("配置文件：" + config::Store::Instance().Path());
+    logger::Info("存储模式：" + std::string(config::Store::Instance().IsPortable() ? "便携" : "用户目录"));
+
+    // 手势：把配置同步给状态机，再装钩子。装钩子失败不致命（托盘仍可用），但必须让用户知道。
+    ApplyGestureSettings();
+    if (input::Hook::Instance().Start(m_window.m_hWnd)) {
+        ::SetTimer(m_window.m_hWnd, kGestureTimerId, kGestureTimerMs, nullptr);
+    } else {
+        logger::Error("手势功能不可用：鼠标钩子安装失败");
+        ::MessageBoxW(nullptr, L"鼠标钩子安装失败，手势功能不可用。\n详情见日志。", kAppTitle,
+                      MB_OK | MB_ICONWARNING);
+    }
+
     return StartResult::Ok;
+}
+
+void CApp::ApplyGestureSettings() {
+    const config::Config cfg = config::Store::Instance().Snapshot();
+    gesture::Settings s;
+    s.startDistance = cfg.gesture.startDistance;
+    s.timeoutMs = cfg.gesture.timeoutMs;
+    s.restoreOnFailure = cfg.gesture.restoreOnFailure;
+    input::Hook::Instance().SetSettings(s);
+    logger::Info("手势参数：StartDistance=" + std::to_string(s.startDistance) +
+                 " TimeoutMs=" + std::to_string(s.timeoutMs) +
+                 " Sensitivity=" + std::to_string(cfg.gesture.sensitivity) +
+                 " RestoreOnFailure=" + std::string(s.restoreOnFailure ? "true" : "false"));
+}
+
+void CApp::DrainGestureResults() {
+    gesture::Machine& machine = input::Hook::Instance().Machine();
+    gesture::Trace trace;
+    while (machine.TakeCompleted(&trace)) {
+        logger::Info("手势结果 " + gesture::FormatTrace(trace));
+    }
+    const unsigned int lost = machine.lostResults();
+    if (lost != m_lostGestureResults) {
+        m_lostGestureResults = lost;
+        logger::Warn("有手势结果因宿主线程未及时取走而被覆盖，累计 " + std::to_string(lost) + " 次");
+    }
 }
 
 int CApp::Run() {
@@ -204,6 +254,13 @@ int CApp::Run() {
 
 void CApp::Shutdown() {
     g_crashTrayValid = false;
+    if (m_window.m_hWnd != nullptr) {
+        ::KillTimer(m_window.m_hWnd, kGestureTimerId);
+    }
+    // 退出顺序不可颠倒（调研 L-1）：先卸钩子并停钩子线程，再销毁窗口、摘托盘图标，
+    // 最后关日志。反过来的话，钩子回调可能在窗口对象已销毁之后触发。
+    input::Hook::Instance().Stop();
+    logger::Info("已卸载鼠标钩子，准备退出");
     m_tray.Remove();
     if (m_window.m_hWnd != nullptr) {
         m_window.DestroyWindow();
@@ -213,6 +270,7 @@ void CApp::Shutdown() {
         ::CloseHandle(m_singleInstance);
         m_singleInstance = nullptr;
     }
+    logger::Shutdown();
 }
 
 void CApp::ExecuteCommand(UINT id) {
@@ -230,6 +288,9 @@ void CApp::ExecuteCommand(UINT id) {
 void CApp::TogglePause() {
     m_paused = !m_paused;
     m_tray.SetPaused(m_paused);
+    // 暂停 = 钩子全部放行，且清掉可能画到一半的手势
+    input::Hook::Instance().SetPaused(m_paused);
+    logger::Info(std::string("已") + (m_paused ? "暂停" : "恢复"));
 }
 
 void CApp::OpenSettings() {
@@ -252,6 +313,9 @@ void CApp::ReloadConfig() {
                      reloaded.outcome == config::LoadOutcome::CreatedDefault);
     ::MessageBoxW(nullptr, text.c_str(), kAppTitle,
                   MB_OK | (ok ? MB_ICONINFORMATION : MB_ICONWARNING));
+
+    // 重载后把新手势参数同步给状态机（否则要重启才生效）
+    ApplyGestureSettings();
 }
 
 void CApp::ToggleAutostart() {
@@ -269,11 +333,15 @@ void CApp::ShowAbout() {
         std::wstring(kAppTitle) + L" 0.1.0\n\n"
         L"Windows 鼠标手势 / 鼠标增强工具。\n"
         L"以 MouseInc 为骨架独立复现，并计划集成部分 Aitiy 特性。\n\n"
-        L"当前状态：阶段 1（托盘、单实例、暂停、开机启动、配置系统）。\n"
-        L"图标为占位图，正式图标待定。\n\n"
+        L"当前状态：阶段 1（托盘、单实例、暂停、开机启动、配置系统、鼠标钩子与手势状态机）。\n"
+        L"识别与动作执行尚未接入。\n\n"
         L"配置文件：" + ToWide(store.Path()) + L"\n"
         L"存储模式：" + (store.IsPortable() ? L"便携（exe 同目录）" : L"用户目录") + L"\n"
-        L"SchemaVersion：" + std::to_wstring(current.schemaVersion) + L"\n\n"
+        L"SchemaVersion：" + std::to_wstring(current.schemaVersion) + L"\n"
+        L"鼠标钩子：" +
+        std::wstring(input::Hook::Instance().installed() ? L"已安装" : L"未安装") +
+        (input::Hook::Instance().paused() ? L"（已暂停）" : L"") + L"\n"
+        L"日志：" + ToWide(logger::Path()) + L"\n\n"
         L"本程序不包含 MouseInc / Aitiy 的任何代码或资源。";
     ::MessageBoxW(nullptr, text.c_str(), kAppTitle, MB_OK | MB_ICONINFORMATION);
 }
@@ -333,6 +401,32 @@ LRESULT CApp::CMainWindow::OnAppCommand(UINT, WPARAM wParam, LPARAM, BOOL&) {
 LRESULT CApp::CMainWindow::OnSecondInstance(UINT, WPARAM, LPARAM, BOOL&) {
     // 第二个实例已被拦截并退出，这里只做用户可感知的提示。
     CApp::Instance().Tray().NotifyAlreadyRunning();
+    return 0;
+}
+
+LRESULT CApp::CMainWindow::OnTimer(UINT, WPARAM wParam, LPARAM, BOOL&) {
+    if (wParam == kGestureTimerId) {
+        CApp& app = CApp::Instance();
+        // 停顿超时（注意：是「移动停顿」超时，不是整个手势的总时长）
+        input::Hook::Instance().Machine().CheckTimeout(::GetTickCount());
+        app.DrainGestureResults();
+    }
+    return 0;
+}
+
+LRESULT CApp::CMainWindow::OnGestureDone(UINT, WPARAM, LPARAM, BOOL&) {
+    CApp::Instance().DrainGestureResults();
+    return 0;
+}
+
+LRESULT CApp::CMainWindow::OnReinjectClick(UINT, WPARAM wParam, LPARAM lParam, BOOL&) {
+    // 钩子线程把「这次是普通右键」的结论交过来，由本线程执行注入。
+    // 放在这里而不是回调里：钩子回调必须尽量短，SendInput 不是回调该做的事。
+    POINT pt{static_cast<LONG>(static_cast<INT_PTR>(wParam)),
+             static_cast<LONG>(static_cast<INT_PTR>(lParam))};
+    input::Hook& hook = input::Hook::Instance();
+    hook.ReinjectRightClick(pt);
+    hook.NotifyReinjected();
     return 0;
 }
 

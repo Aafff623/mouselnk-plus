@@ -38,6 +38,9 @@ add_executable(mouselnk-plus WIN32
     src/App.cpp
     src/Tray.cpp
     src/Config.cpp
+    src/Log.cpp
+    src/GestureState.cpp
+    src/Input.cpp
     src/app.rc
     # manifest 作为源文件交给 CMake，由链接器合并进唯一的 MANIFEST 资源
     # （声明 Common Controls v6、PerMonitorV2 DPI 感知、asInvoker）。

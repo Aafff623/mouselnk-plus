@@ -51,18 +51,24 @@ public:
             MESSAGE_HANDLER(WM_CLOSE, OnClose)
             MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
             MESSAGE_HANDLER(WM_ENDSESSION, OnEndSession)
+            MESSAGE_HANDLER(WM_TIMER, OnTimer)
             // TaskbarCreated 是运行时注册的消息，用成员变量作为消息 ID。
             // 注意 BEGIN_MSG_MAP 自身就会定义 ProcessWindowMessage，不要再自己声明。
             MESSAGE_HANDLER(taskbarCreatedMessage, OnTaskbarCreated)
             MESSAGE_HANDLER(WM_APP_TRAY, OnTrayNotify)
             MESSAGE_HANDLER(WM_APP_COMMAND, OnAppCommand)
             MESSAGE_HANDLER(WM_APP_SECOND_INSTANCE, OnSecondInstance)
+            MESSAGE_HANDLER(WM_APP_GESTURE_DONE, OnGestureDone)
+            MESSAGE_HANDLER(WM_APP_REINJECT_CLICK, OnReinjectClick)
         END_MSG_MAP()
 
         LRESULT OnCreate(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnClose(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnDestroy(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnEndSession(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnTimer(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnGestureDone(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnReinjectClick(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnTrayNotify(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnAppCommand(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnSecondInstance(UINT, WPARAM, LPARAM, BOOL&);
@@ -88,10 +94,14 @@ private:
     void ShowAbout();
     void ExitApp();
 
+    void ApplyGestureSettings();     // 把配置里的手势参数同步给状态机
+    void DrainGestureResults();      // 取走并记录已完成的手势结果
+
     HINSTANCE   m_instance = nullptr;
     HANDLE      m_singleInstance = nullptr;
     CMainWindow m_window;
     CTray       m_tray;
     bool        m_paused = false;
     std::string m_configStatus;   // 最近一次配置载入/重载的结果说明
+    unsigned int m_lostGestureResults = 0;   // 已上报的「结果被覆盖」计数，避免重复告警
 };

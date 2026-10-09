@@ -198,6 +198,17 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 - **WebView2 两个常见误解要纠正**：① 对非 UWP 应用，**默认 user data 目录就在 exe 旁边**（`{exe文件名}.WebView2`），不是系统目录——真正的硬伤是 exe 目录不可写时会失败、以及会在程序旁留一个体积不小的缓存目录；解法是显式传 `userDataFolder`（便携模式用 exe 同目录 + 可写性探测，回落 `%LOCALAPPDATA%`），注意环境变量 `WEBVIEW2_USER_DATA_FOLDER` 与注册表策略会**覆盖**程序传入值。② **不需要 Mongoose、不需要起回环服务**：用 `SetVirtualHostNameToFolderMapping` 把本地 `ui/` 目录映射为虚拟域名即可离线加载。另外 Fixed Version 运行时对便携程序不可接受（包体 +250 MB、需改 ACL、不能从网络路径运行），应走 Evergreen + 启动探测 + 明确告知。
 - **`WebView2LoaderStatic.lib`（静态 loader）要在 CMake 下手动集成**（解 nupkg 取 `build/native/x64/WebView2LoaderStatic.lib`，JUCE/wxWidgets/Tauri 都走这条路，官方给的是 MSBuild 属性，我们用不上）。它是保住单文件的关键，**但与静态 CRT `/MT` 的兼容性无官方说明，必须真机构建验证**。
 
+### 鼠标钩子与手势状态机的既定事实（T-0004 已实现并真机验证）
+
+- **钩子装在专用消息泵线程上**（`src/Input.cpp`）。低级钩子被投递到「安装它的那个线程」的消息队列，该线程必须持续 pump；从别的线程装会装上一个永远收不到投递的钩子。安装/卸载/暂停/补发回执**一律通过 `PostThreadMessage` 回到该线程执行**。
+- **回调内零分配、零锁、零 I/O**：状态机被做成纯逻辑（`src/GestureState.cpp`），可以在回调里直接跑——这是必须的，因为「吞掉还是放行这个事件」必须当场决定，不能等另一个线程。`SendInput` 补发**不放在回调里**，而是投给 App 线程执行（回调超 300ms 会被系统静默摘钩子）。
+- **自身模拟输入的标记**：`dwExtraInfo == 0x4D4C4E4B0001`（ASCII 'MLNK' + 序号）。补发的右键带此标记，钩子见到就直接放行，避免递归处理。
+- **吞不吞事件的规则**：右键按下**吞掉**（否则目标程序会在用户画手势期间收到一个右键按下，被拖拽类操作干扰）；未达 StartDistance 就抬起 → 判定为普通右键，**补发一对 down/up** 让菜单照常弹出；达到阈值 → 收轨迹，抬起时吞掉；右键+滚轮 → 吞掉滚轮与随后的抬起（规格要求此时不弹菜单）；未按右键的滚轮一律放行。
+- **超时是「移动停顿」超时**，不是整个手势的总时长：只有 `Drawing` 状态才超时；按住右键不动仍算普通右键。检测由 App 线程上 50ms 的定时器驱动（`kGestureTimerId`），因为停顿期间不会再有鼠标事件，回调自身无法感知到期。
+- **结果交付用双缓冲槽**：回调把结果封存到两个预分配槽之一，App 线程通过 `TakeCompleted` 取走；宿主太慢导致覆盖时会累计 `lostResults` 并告警。
+- **启动握手**：`Hook::Start()` 等钩子线程报告「已装好/失败」，用独立的 `m_startState`，**不能用 `m_running`**——它由钩子线程自己设置，等待循环若依赖它会在条件判断时就退出（这是实现期踩到的真实 bug，已修）。
+- **自检入口**：`mouselnk-plus.exe --selftest` 用脚本化输入序列跑状态机并把结论写进日志（退出码 0=全过）。存在的理由：验证状态机不该真的动鼠标，而「状态迁移与轨迹点数能写进日志」正是 T-0004 的验收断言。当前 7 项全过。
+
 ## 作者的设计取向与稳定性来源（调研结论）
 
 四份专题调研（`temp/research/mouseinc-deep-dive.md`、`aitiy-deep-dive.md`、`community-voice.md`、`stability-and-design.md`）与综述（`design-thinking-synthesis.md`）得出的结论。**这些解释了我们为什么要守住「轻量」，不是背景故事。**

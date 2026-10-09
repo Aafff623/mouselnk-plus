@@ -23,3 +23,5 @@
 #define WM_APP_TRAY             (WM_APP + 1)  // Shell_NotifyIcon 回调消息
 #define WM_APP_COMMAND          (WM_APP + 2)  // 跨线程投递命令，wParam = IDM_*
 #define WM_APP_SECOND_INSTANCE  (WM_APP + 3)  // 第二个实例启动时通知已有实例
+#define WM_APP_GESTURE_DONE     (WM_APP + 4)  // 钩子线程：有手势结果可取
+#define WM_APP_REINJECT_CLICK   (WM_APP + 5)  // 钩子线程 → App：请补发一对普通右键（wParam=x, lParam=y）
