@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <string>
+
 #include "resource.h"
 
 // 托盘图标与右键菜单。
@@ -21,6 +23,9 @@ public:
 
     // 「已在运行」提示（第二个实例被拦截时调用）。
     void NotifyAlreadyRunning() const;
+
+    // 通用气泡提示（ShowTips 动作等使用）。
+    void ShowBalloon(const wchar_t* title, const std::wstring& text) const;
 
     bool IsAdded() const { return m_added; }
 

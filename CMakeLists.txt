@@ -41,6 +41,8 @@ add_executable(mouselnk-plus WIN32
     src/Log.cpp
     src/GestureState.cpp
     src/Recognizer.cpp
+    src/Actions.cpp
+    src/Overlay.cpp
     src/Input.cpp
     src/app.rc
     # manifest 作为源文件交给 CMake，由链接器合并进唯一的 MANIFEST 资源
@@ -86,6 +88,7 @@ target_link_libraries(mouselnk-plus PRIVATE
     shell32     # Shell_NotifyIcon / ShellExecuteEx / 资源管理器定位
     user32
     gdi32
+    gdiplus     # 轨迹浮层的绘制（作者规格指定的绘制栈）
     advapi32    # 注册表（开机启动项）
 )
 

@@ -1,7 +1,9 @@
 #include "App.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include "Config.h"
@@ -14,6 +16,68 @@ namespace {
 // 手势超时检测的定时器：50ms 一次足够分辨 1s 量级的停顿超时，又不至于是忙等。
 constexpr UINT_PTR kGestureTimerId = 1;
 constexpr UINT     kGestureTimerMs = 50;
+
+// 结果展示后的收起延时：让用户看清「成功 / 无匹配」的反馈，再自动消失。
+constexpr UINT_PTR kOverlayHideTimerId = 2;
+constexpr UINT     kOverlayHideMs = 700;
+
+// "#RRGGBB" → COLORREF，解析失败时用 fallback。
+COLORREF ParseColor(const std::string& text, COLORREF fallback) {
+    if (text.size() == 7 && text[0] == '#') {
+        const auto hex = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return -1;
+        };
+        const int r = hex(text[1]) * 16 + hex(text[2]);
+        const int g = hex(text[3]) * 16 + hex(text[4]);
+        const int b = hex(text[5]) * 16 + hex(text[6]);
+        if (r >= 0 && g >= 0 && b >= 0) {
+            return RGB(r, g, b);
+        }
+    }
+    return fallback;
+}
+
+ui::OverlayStyle MakeOverlayStyle(const config::Config& cfg) {
+    ui::OverlayStyle s;
+    s.drawTrace  = cfg.gesture.drawTrace;
+    s.drawResult = cfg.gesture.drawResult;
+    s.traceArrow = cfg.gesture.traceArrow;
+    s.randColor  = cfg.gesture.randColor;
+    s.traceWidth = cfg.gesture.traceWidth;
+    s.fontSize   = cfg.gesture.fontSize;
+    s.drawColor  = ParseColor(cfg.gesture.drawColor, RGB(0xE4, 0x75, 0x42));
+    s.failColor  = ParseColor(cfg.gesture.failColor, RGB(0xCA, 0xD0, 0xD3));
+    return s;
+}
+
+// 取目标窗口的进程信息（动作上下文需要）。
+void FillProcessInfo(HWND hwnd, actions::Context* ctx) {
+    if (hwnd == nullptr) {
+        return;
+    }
+    DWORD pid = 0;
+    ::GetWindowThreadProcessId(hwnd, &pid);
+    ctx->pid = pid;
+    if (pid == 0) {
+        return;
+    }
+    HANDLE proc = ::OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (proc == nullptr) {
+        return;
+    }
+    wchar_t buf[MAX_PATH]{};
+    DWORD size = static_cast<DWORD>(sizeof(buf) / sizeof(buf[0]));
+    if (::QueryFullProcessImageNameW(proc, 0, buf, &size)) {
+        ctx->processPath = buf;
+        const size_t slash = ctx->processPath.find_last_of(L"\\/");
+        ctx->processName = (slash == std::wstring::npos) ? ctx->processPath
+                                                         : ctx->processPath.substr(slash + 1);
+    }
+    ::CloseHandle(proc);
+}
 
 constexpr const wchar_t* kRunKeyPath   = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 constexpr const wchar_t* kRunValueName = L"mouselnk-plus";
@@ -43,9 +107,6 @@ std::wstring ExecutableDirectory() {
 }
 
 std::wstring ToWide(const std::string& utf8) {
-    if (utf8.empty()) {
-        return {};
-    }
     const int need = ::MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(),
                                            static_cast<int>(utf8.size()), nullptr, 0);
     if (need <= 0) {
@@ -53,6 +114,21 @@ std::wstring ToWide(const std::string& utf8) {
     }
     std::wstring out(static_cast<size_t>(need), L'\0');
     ::MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), static_cast<int>(utf8.size()), out.data(), need);
+    return out;
+}
+
+std::string ToUtf8(const std::wstring& wide) {
+    if (wide.empty()) {
+        return {};
+    }
+    const int need = ::WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()),
+                                           nullptr, 0, nullptr, nullptr);
+    if (need <= 0) {
+        return {};
+    }
+    std::string out(static_cast<size_t>(need), '\0');
+    ::WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), static_cast<int>(wide.size()), out.data(), need,
+                          nullptr, nullptr);
     return out;
 }
 
@@ -203,6 +279,14 @@ CApp::StartResult CApp::Initialize(HINSTANCE instance) {
     logger::Info("配置文件：" + config::Store::Instance().Path());
     logger::Info("存储模式：" + std::string(config::Store::Instance().IsPortable() ? "便携" : "用户目录"));
 
+    // 轨迹浮层：初始化失败不致命，手势仍能识别与执行，只是看不到轨迹。
+    if (!ui::Overlay::Instance().Initialize(m_instance)) {
+        logger::Warn("轨迹浮层初始化失败：手势仍可用，但看不到轨迹");
+    }
+
+    // 动作执行线程：动作链在后台串行跑，绝不阻塞钩子与消息循环。
+    StartActionWorker();
+
     // 手势：把配置同步给状态机，再装钩子。装钩子失败不致命（托盘仍可用），但必须让用户知道。
     ApplyGestureSettings();
     if (input::Hook::Instance().Start(m_window.m_hWnd)) {
@@ -223,9 +307,26 @@ void CApp::ApplyGestureSettings() {
     s.timeoutMs = cfg.gesture.timeoutMs;
     s.restoreOnFailure = cfg.gesture.restoreOnFailure;
     input::Hook::Instance().SetSettings(s);
+
+    // 识别器：模板与灵敏度都来自配置，重载后立即生效（无需重启）。
+    std::vector<gesture::GestureTemplate> templates;
+    templates.reserve(cfg.gestures.size());
+    for (const config::GestureTemplate& g : cfg.gestures) {
+        gesture::GestureTemplate t;
+        t.id = g.id;
+        t.points.reserve(g.points.size());
+        for (const config::Point& p : g.points) {
+            t.points.push_back(gesture::PointD{p.x, p.y});
+        }
+        templates.push_back(std::move(t));
+    }
+    m_recognizer.SetTemplates(std::move(templates));
+    m_recognizer.SetSensitivity(cfg.gesture.sensitivity);
+
     logger::Info("手势参数：StartDistance=" + std::to_string(s.startDistance) +
                  " TimeoutMs=" + std::to_string(s.timeoutMs) +
                  " Sensitivity=" + std::to_string(cfg.gesture.sensitivity) +
+                 " 模板数=" + std::to_string(m_recognizer.templateCount()) +
                  " RestoreOnFailure=" + std::string(s.restoreOnFailure ? "true" : "false"));
 }
 
@@ -234,12 +335,163 @@ void CApp::DrainGestureResults() {
     gesture::Trace trace;
     while (machine.TakeCompleted(&trace)) {
         logger::Info("手势结果 " + gesture::FormatTrace(trace));
+        HandleGestureResult(trace);
     }
     const unsigned int lost = machine.lostResults();
     if (lost != m_lostGestureResults) {
         m_lostGestureResults = lost;
         logger::Warn("有手势结果因宿主线程未及时取走而被覆盖，累计 " + std::to_string(lost) + " 次");
     }
+}
+
+void CApp::OnTracePoint(int x, int y) {
+    ui::Overlay& overlay = ui::Overlay::Instance();
+
+    // 本次手势的第一个点：记录目标窗口并开始新的浮层轨迹。
+    if (!m_gestureActive) {
+        m_gestureActive = true;
+        const POINT p{x, y};
+        // 目标窗口取「手势起点所在的顶层窗口」，动作默认针对它（跨过别的窗口不改变目标）。
+        m_gestureTarget = ::GetAncestor(::WindowFromPoint(p), GA_ROOT);
+        overlay.BeginGesture();
+    }
+
+    overlay.AddPoint(POINT{x, y});
+    overlay.DrawLive(MakeOverlayStyle(config::Store::Instance().Snapshot()));
+}
+
+void CApp::HandleGestureResult(const gesture::Trace& trace) {
+    m_gestureActive = false;
+    ::KillTimer(m_window.m_hWnd, kOverlayHideTimerId);
+
+    const config::Config cfg = config::Store::Instance().Snapshot();
+    const ui::OverlayStyle style = MakeOverlayStyle(cfg);
+    ui::Overlay& overlay = ui::Overlay::Instance();
+
+    if (trace.finalState == gesture::State::Cancelled) {
+        overlay.Hide();
+        return;
+    }
+
+    // 伪手势（右键滚轮）直接用固定标识，不走轨迹识别。
+    std::string gestureId;
+    if (trace.kind == gesture::Kind::WheelUp) {
+        gestureId = "WheelSwitchUp";
+    } else if (trace.kind == gesture::Kind::WheelDown) {
+        gestureId = "WheelSwitchDown";
+    } else if (trace.kind == gesture::Kind::Trace) {
+        const gesture::MatchResult m =
+            m_recognizer.Recognize(gesture::Recognizer::FromTrace(trace));
+        if (m.matched) {
+            gestureId = m.templateId;
+            std::string top;
+            for (size_t i = 0; i < m.candidates.size() && i < 3; ++i) {
+                top += (i ? " " : "") + m.candidates[i].id + "=" +
+                       std::to_string(static_cast<int>(m.candidates[i].score));
+            }
+            logger::Info("识别：" + gestureId + " 得分=" +
+                         std::to_string(static_cast<int>(m.score)) + "（候选 " + top + "）");
+        } else {
+            logger::Info("识别：无匹配（阈值 " +
+                         std::to_string(static_cast<int>(m_recognizer.threshold())) + "）");
+        }
+    }
+
+    // 查绑定。应用规则（按程序匹配）是 T-0013 的范围，当前只查全局绑定。
+    const config::Binding* binding = nullptr;
+    for (const config::Binding& b : cfg.matchGlobal) {
+        if (b.enabled && !gestureId.empty() && b.gestureId == gestureId) {
+            binding = &b;
+            break;
+        }
+    }
+
+    if (binding == nullptr) {
+        const bool matchedSomething = !gestureId.empty();
+        overlay.ShowResult(style,
+                           matchedSomething ? ui::Overlay::ResultState::NoAction
+                                            : ui::Overlay::ResultState::NoMatch,
+                           L"");
+        ScheduleOverlayHide();
+        return;
+    }
+
+    overlay.ShowResult(style, ui::Overlay::ResultState::Success, ToWide(binding->name));
+    ScheduleOverlayHide();
+    EnqueueAction(*binding, trace);
+}
+
+void CApp::ScheduleOverlayHide() {
+    ::SetTimer(m_window.m_hWnd, kOverlayHideTimerId, kOverlayHideMs, nullptr);
+}
+
+void CApp::StartActionWorker() {
+    m_actionStop = false;
+    m_actionThread = std::thread([this]() {
+        for (;;) {
+            ActionJob job;
+            {
+                std::unique_lock<std::mutex> lock(m_actionMutex);
+                m_actionCv.wait(lock, [this]() { return m_actionStop || !m_actionQueue.empty(); });
+                if (m_actionStop && m_actionQueue.empty()) {
+                    return;
+                }
+                job = std::move(m_actionQueue.front());
+                m_actionQueue.pop_front();
+            }
+            // 动作链在工作线程串行执行：Delay / SendKeys / 启动程序都不会卡住 UI 与钩子。
+            const int failed = actions::ExecuteChain(job.chain, job.ctx, m_window.m_hWnd);
+            if (failed < 0) {
+                logger::Info("动作链执行完成（" + std::to_string(job.chain.size()) + " 个动作）");
+            }
+        }
+    });
+}
+
+void CApp::StopActionWorker() {
+    {
+        std::lock_guard<std::mutex> lock(m_actionMutex);
+        m_actionStop = true;
+        m_actionQueue.clear();
+    }
+    m_actionCv.notify_all();
+    if (m_actionThread.joinable()) {
+        m_actionThread.join();
+    }
+}
+
+void CApp::EnqueueAction(const config::Binding& binding, const gesture::Trace& trace) {
+    ActionJob job;
+    job.chain = binding.actions;   // 拷贝一份：配置可能在执行期间被重载
+    job.ctx.start = POINT{trace.start.x, trace.start.y};
+    job.ctx.end = POINT{trace.end.x, trace.end.y};
+    job.ctx.targetWindow = m_gestureTarget;
+    job.ctx.tempText = m_tempText;
+    FillProcessInfo(m_gestureTarget, &job.ctx);
+
+    // 轨迹包围矩形
+    if (trace.pointCount > 0) {
+        LONG l = trace.points[0].p.x, r = l, t = trace.points[0].p.y, b = t;
+        for (int i = 1; i < trace.pointCount; ++i) {
+            l = std::min<LONG>(l, trace.points[i].p.x);
+            r = std::max<LONG>(r, trace.points[i].p.x);
+            t = std::min<LONG>(t, trace.points[i].p.y);
+            b = std::max<LONG>(b, trace.points[i].p.y);
+        }
+        job.ctx.bounds = RECT{l, t, r, b};
+    }
+
+    logger::Info("执行动作：" + binding.name + "（" + binding.gestureId + "，" +
+                 std::to_string(job.chain.size()) + " 个动作，目标 " +
+                 (job.ctx.processName.empty() ? std::string("未知")
+                                              : ToUtf8(job.ctx.processName)) +
+                 "）");
+
+    {
+        std::lock_guard<std::mutex> lock(m_actionMutex);
+        m_actionQueue.push_back(std::move(job));
+    }
+    m_actionCv.notify_one();
 }
 
 int CApp::Run() {
@@ -256,11 +508,15 @@ void CApp::Shutdown() {
     g_crashTrayValid = false;
     if (m_window.m_hWnd != nullptr) {
         ::KillTimer(m_window.m_hWnd, kGestureTimerId);
+        ::KillTimer(m_window.m_hWnd, kOverlayHideTimerId);
     }
-    // 退出顺序不可颠倒（调研 L-1）：先卸钩子并停钩子线程，再销毁窗口、摘托盘图标，
-    // 最后关日志。反过来的话，钩子回调可能在窗口对象已销毁之后触发。
+    // 退出顺序不可颠倒（调研 L-1）：先卸钩子并停钩子线程，再停动作线程、收浮层，
+    // 然后销毁窗口、摘托盘图标，最后关日志。反过来的话，钩子回调或动作链可能在
+    // 窗口对象已销毁之后触发。
     input::Hook::Instance().Stop();
     logger::Info("已卸载鼠标钩子，准备退出");
+    StopActionWorker();
+    ui::Overlay::Instance().Shutdown();
     m_tray.Remove();
     if (m_window.m_hWnd != nullptr) {
         m_window.DestroyWindow();
@@ -410,6 +666,32 @@ LRESULT CApp::CMainWindow::OnTimer(UINT, WPARAM wParam, LPARAM, BOOL&) {
         // 停顿超时（注意：是「移动停顿」超时，不是整个手势的总时长）
         input::Hook::Instance().Machine().CheckTimeout(::GetTickCount());
         app.DrainGestureResults();
+    } else if (wParam == kOverlayHideTimerId) {
+        ::KillTimer(m_hWnd, kOverlayHideTimerId);
+        ui::Overlay::Instance().Hide();
+    }
+    return 0;
+}
+
+LRESULT CApp::CMainWindow::OnTracePointMsg(UINT, WPARAM wParam, LPARAM lParam, BOOL&) {
+    // 钩子线程投递的轨迹点：只做「追加 + 重绘」，不做识别（识别等轨迹封存后一次算）。
+    // 这里先把队列里积压的同类消息一次性抽干，避免高频移动时每个点都重绘一次。
+    MSG msg{};
+    int x = static_cast<int>(static_cast<INT_PTR>(wParam));
+    int y = static_cast<int>(static_cast<INT_PTR>(lParam));
+    while (::PeekMessageW(&msg, m_hWnd, WM_APP_TRACE_POINT, WM_APP_TRACE_POINT, PM_REMOVE)) {
+        x = static_cast<int>(static_cast<INT_PTR>(msg.wParam));
+        y = static_cast<int>(static_cast<INT_PTR>(msg.lParam));
+    }
+    CApp::Instance().OnTracePoint(x, y);
+    return 0;
+}
+
+LRESULT CApp::CMainWindow::OnShowTipMsg(UINT, WPARAM wParam, LPARAM, BOOL&) {
+    // 动作线程把提示文本的所有权交过来，这里负责显示并释放。
+    std::unique_ptr<std::wstring> text(reinterpret_cast<std::wstring*>(wParam));
+    if (text != nullptr) {
+        CApp::Instance().Tray().ShowBalloon(L"mouselnk-plus", *text);
     }
     return 0;
 }

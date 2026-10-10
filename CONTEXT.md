@@ -209,6 +209,30 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 - **启动握手**：`Hook::Start()` 等钩子线程报告「已装好/失败」，用独立的 `m_startState`，**不能用 `m_running`**——它由钩子线程自己设置，等待循环若依赖它会在条件判断时就退出（这是实现期踩到的真实 bug，已修）。
 - **自检入口**：`mouselnk-plus.exe --selftest` 用脚本化输入序列跑状态机并把结论写进日志（退出码 0=全过）。存在的理由：验证状态机不该真的动鼠标，而「状态迁移与轨迹点数能写进日志」正是 T-0004 的验收断言。当前 7 项全过。
 
+## 手势链路（T-0005/T-0006/T-0007/T-0008/T-0009 已实现并真机验证）
+
+阶段 1 的核心链路已经跑通：**按住右键划动 → 浮层显示轨迹 → 松手识别 → 执行绑定动作**。
+
+- **识别引擎**（`src/Recognizer.*`）：严格按作者规格实现整体路径模板匹配，不引入任何几何特征判别。位置与整体大小天然不影响结果（比较的是方向角），但保留绘制方向差异。纯逻辑、不依赖 Win32，因此能直接编进测试工程。
+- **测试**（`tests/`，doctest + CTest）：17 个用例 / 275 条断言。用本机 `MouseInc.json` 实测的 **36 条模板做自我识别，全部以满分 100 识别为自身**；另验证上下/左右/斜向不互混、环形角差、等距重采样与各类退化输入。测试 exe 不进发行物。
+- **轨迹浮层**（`src/Overlay.*`）：GDI+ 分层窗口，窗口**只覆盖轨迹包围盒**而不是整个虚拟桌面 —— 分层窗口内存随面积走，全屏 DIB 在多屏 4K 下轻易几十 MB，而轨迹只有几百像素。GDI+ 直接画进 `CreateDIBSection` 的位（`PixelFormat32bppPARGB`），一次 `UpdateLayeredWindow` 合成。`WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW` 保证不抢焦点、不阻挡鼠标、不进任务栏。
+- **动作引擎**（`src/Actions.*`）：手势/热键/边缘/热角将来共用。基础动作已实现（SendKeys/KeyDown/KeyUp/MouseClick/MouseMove/Execute/ActivateWindow/Window/HideToTray/RestoreFromTray/SetClipboard/Delay/ShowTips/Internal）；**已知但本阶段未实现的动作给出明确错误并注明计划任务号**，不静默成功。动作链**先整体校验再执行**，避免执行到一半才发现参数错。
+- **执行线程模型**：动作链在**单个后台工作线程上串行执行**（`CApp::m_actionThread` + 队列 + 条件变量），绝不阻塞钩子回调与消息循环；`Delay`/`Execute`/`SendKeys` 都跑在这里。需要动 UI 的动作（Internal 的设置/重载/暂停/退出、ShowTips）通过 `PostMessage(WM_APP_COMMAND / WM_APP_SHOW_TIP)` 回到 UI 线程。退出时先卸钩子、再停动作线程、收浮层，最后销毁窗口与托盘。
+- **轨迹实时投递**：钩子回调只做「喂状态机 + `PostMessage` 一个轨迹点」，绘制全部在 App 线程；App 收到后先抽干队列里积压的同类消息再重绘一次，避免高频移动导致重绘风暴。**钩子回调里不做任何读取跨线程缓冲区的操作**。
+
+### 本机显示环境与 DPI（实测，2026-10-10）
+
+- 主显示器 **2560×1600 物理像素，DPI 144（150% 缩放）**，单显示器，虚拟桌面与主屏一致。
+- 程序 manifest 的 **PerMonitorV2 生效**：程序看到的鼠标坐标是**物理像素**（实测手势坐标 y 可达 1121，超过 150% 下的逻辑高度 1067，证明不是逻辑坐标）。
+- **浮层定位已用像素级验证**：截图里轨迹色（`#E47542`）像素的包围盒与日志中该次手势的物理坐标吻合，**没有高 DPI 偏移**。这条正是 `Known failure modes` 里点名要防的失效模式，阶段 1 即已守住。
+- 注意：用**非 DPI 感知**的进程截图（如默认的 PowerShell）会得到被虚拟化的坐标与尺寸，用来对照程序日志会得出错误结论。对照时必须先 `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)`。
+
+### 识别灵敏度的实测观察（待继续观察）
+
+默认 `Sensitivity = 50` 对应阈值 **75**。合成轨迹（等距直线）得分 100，但**真人手绘的轨迹得分明显更低**：实测日志里自然划动多在 **75～95** 区间，个别只有 75（刚好压线通过）。这说明默认阈值对手绘抖动偏严；等 T-0011（设置界面可调灵敏度）落地后需要结合真人样本再定默认值。**不要为了让样本通过而放宽阈值**——先记录证据，再按规格（阈值公式由作者给定）决定是否调整默认灵敏度。
+
+
+
 ## 作者的设计取向与稳定性来源（调研结论）
 
 四份专题调研（`temp/research/mouseinc-deep-dive.md`、`aitiy-deep-dive.md`、`community-voice.md`、`stability-and-design.md`）与综述（`design-thinking-synthesis.md`）得出的结论。**这些解释了我们为什么要守住「轻量」，不是背景故事。**

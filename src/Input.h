@@ -18,6 +18,10 @@
 // 自身模拟输入用 dwExtraInfo 标记，避免补发的右键被自己的钩子再处理（递归）。
 namespace input {
 
+// 自身模拟输入的标记（ASCII 'MLNK'）。钩子见到带此标记的事件直接放行，避免把
+// 自己注入的输入当成用户输入再处理一遍（补发右键、动作引擎的鼠标点击都用它）。
+inline constexpr ULONG_PTR kSelfInjectionTag = 0x4D4C4E4B0001ull;
+
 // 监听所有鼠标事件（不止右键）；未消费的一律放行。
 class Hook {
 public:
@@ -74,6 +78,10 @@ private:
 
     // 全局唯一实例的指针，供静态钩子过程访问（本程序单实例运行）
     static Hook* s_instance;
+
+    // 钩子线程私有：上一次喂给状态机后的状态，用来检测「刚进入绘制」这一跳变
+    // （进入绘制时要先把起点补给浮层，否则轨迹缺头）。只在钩子线程读写。
+    gesture::State m_prevState = gesture::State::Idle;
 
     gesture::Machine m_machine;
 };

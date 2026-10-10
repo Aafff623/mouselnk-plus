@@ -1,6 +1,11 @@
 #pragma once
 
+#include <condition_variable>
+#include <deque>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <vector>
 
 #include <windows.h>
 
@@ -10,6 +15,11 @@
 extern CAppModule _Module;
 #include <atlwin.h>
 
+#include "Actions.h"
+#include "Config.h"
+#include "GestureState.h"
+#include "Overlay.h"
+#include "Recognizer.h"
 #include "Tray.h"
 
 // 应用级状态与命令分发。
@@ -60,6 +70,8 @@ public:
             MESSAGE_HANDLER(WM_APP_SECOND_INSTANCE, OnSecondInstance)
             MESSAGE_HANDLER(WM_APP_GESTURE_DONE, OnGestureDone)
             MESSAGE_HANDLER(WM_APP_REINJECT_CLICK, OnReinjectClick)
+            MESSAGE_HANDLER(WM_APP_TRACE_POINT, OnTracePointMsg)
+            MESSAGE_HANDLER(WM_APP_SHOW_TIP, OnShowTipMsg)
         END_MSG_MAP()
 
         LRESULT OnCreate(UINT, WPARAM, LPARAM, BOOL&);
@@ -69,6 +81,8 @@ public:
         LRESULT OnTimer(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnGestureDone(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnReinjectClick(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnTracePointMsg(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnShowTipMsg(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnTrayNotify(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnAppCommand(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnSecondInstance(UINT, WPARAM, LPARAM, BOOL&);
@@ -94,8 +108,16 @@ private:
     void ShowAbout();
     void ExitApp();
 
-    void ApplyGestureSettings();     // 把配置里的手势参数同步给状态机
-    void DrainGestureResults();      // 取走并记录已完成的手势结果
+    void ApplyGestureSettings();     // 把配置里的手势参数与模板同步给状态机与识别器
+    void DrainGestureResults();      // 取走并处理已完成的手势结果
+    void HandleGestureResult(const gesture::Trace& trace);   // 识别 → 查绑定 → 执行 → 反馈
+    void OnTracePoint(int x, int y); // 浮层：追加一个轨迹点并重绘
+    void ScheduleOverlayHide();      // 结果展示后延时收起浮层
+
+    // 动作执行线程：动作链在后台串行执行，绝不阻塞钩子与消息循环。
+    void StartActionWorker();
+    void StopActionWorker();
+    void EnqueueAction(const config::Binding& binding, const gesture::Trace& trace);
 
     HINSTANCE   m_instance = nullptr;
     HANDLE      m_singleInstance = nullptr;
@@ -104,4 +126,21 @@ private:
     bool        m_paused = false;
     std::string m_configStatus;   // 最近一次配置载入/重载的结果说明
     unsigned int m_lostGestureResults = 0;   // 已上报的「结果被覆盖」计数，避免重复告警
+
+    gesture::Recognizer m_recognizer;
+
+    // 当前手势的目标窗口（按下时记录，动作默认针对它）
+    bool   m_gestureActive = false;
+    HWND   m_gestureTarget = nullptr;
+    std::wstring m_tempText;      // %tempstr% 的当前值（GetSelectedText 落地前为空）
+
+    struct ActionJob {
+        std::vector<config::Action> chain;
+        actions::Context            ctx;
+    };
+    std::thread             m_actionThread;
+    std::mutex              m_actionMutex;
+    std::condition_variable m_actionCv;
+    std::deque<ActionJob>   m_actionQueue;
+    bool                    m_actionStop = false;
 };

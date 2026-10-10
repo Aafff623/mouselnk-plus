@@ -25,3 +25,5 @@
 #define WM_APP_SECOND_INSTANCE  (WM_APP + 3)  // 第二个实例启动时通知已有实例
 #define WM_APP_GESTURE_DONE     (WM_APP + 4)  // 钩子线程：有手势结果可取
 #define WM_APP_REINJECT_CLICK   (WM_APP + 5)  // 钩子线程 → App：请补发一对普通右键（wParam=x, lParam=y）
+#define WM_APP_TRACE_POINT      (WM_APP + 6)  // 钩子线程 → App：轨迹新增一个点（wParam=x, lParam=y）
+#define WM_APP_SHOW_TIP         (WM_APP + 7)  // 动作线程 → App：显示一条提示（wParam = std::wstring*，接收方负责 delete）

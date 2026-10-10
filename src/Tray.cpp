@@ -83,6 +83,19 @@ void CTray::NotifyAlreadyRunning() const {
     ::Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
+void CTray::ShowBalloon(const wchar_t* title, const std::wstring& text) const {
+    if (!m_added) {
+        return;
+    }
+    NOTIFYICONDATAW nid = m_nid;
+    nid.uFlags |= NIF_INFO;
+    nid.dwInfoFlags = NIIF_INFO;
+    nid.uTimeout = 5000;
+    ::wcsncpy_s(nid.szInfoTitle, title != nullptr ? title : L"mouselnk-plus", _TRUNCATE);
+    ::wcsncpy_s(nid.szInfo, text.c_str(), _TRUNCATE);
+    ::Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 UINT CTray::PopupMenu(bool paused, bool autostartEnabled) {
     HMENU menu = ::CreatePopupMenu();
     if (menu == nullptr) {

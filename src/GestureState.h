@@ -103,6 +103,9 @@ public:
     bool TakeCompleted(Trace* out);
     std::uint32_t lostResults() const { return m_lostResults; }
 
+    // 是否有已封存、等待宿主取走的结果（钩子线程用它决定是否通知宿主）。
+    bool hasReady() const { return m_readySlot.load() >= 0; }
+
     void Reset();
 
     State state() const { return m_state; }

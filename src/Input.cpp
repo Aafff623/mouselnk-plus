@@ -6,10 +6,6 @@
 namespace input {
 namespace {
 
-// 自身模拟输入的标记。补发的右键必须带上它，否则会被自己的钩子当成用户输入再处理一遍。
-// 取一个不太可能与别的程序撞车的常量（高位是 ASCII 'MLNK'）。
-constexpr ULONG_PTR kSelfInjectionTag = 0x4D4C4E4B0001ull;
-
 // 投递到钩子线程的自定义消息（只能由 PostThreadMessage 送达，没有窗口）
 constexpr UINT kThreadMsgPause      = WM_APP + 10;
 constexpr UINT kThreadMsgReinjected = WM_APP + 11;
@@ -160,6 +156,27 @@ LRESULT CALLBACK Hook::MouseProc(int code, WPARAM wParam, LPARAM lParam) {
         ::PostMessageW(self->m_notifyWindow, WM_APP_REINJECT_CLICK,
                        static_cast<WPARAM>(static_cast<INT_PTR>(ms->pt.x)),
                        static_cast<LPARAM>(static_cast<INT_PTR>(ms->pt.y)));
+    }
+
+    // 轨迹实时投递给浮层：回调只做「喂状态机 + 投递」，绘制全部在 App 线程。
+    // 进入绘制的那一跳先补起点，否则浮层的折线缺头。
+    const gesture::State st = self->m_machine.state();
+    if (self->m_prevState != gesture::State::Drawing && st == gesture::State::Drawing) {
+        const gesture::Vec2 s = self->m_machine.startPoint();
+        ::PostMessageW(self->m_notifyWindow, WM_APP_TRACE_POINT,
+                       static_cast<WPARAM>(static_cast<INT_PTR>(s.x)),
+                       static_cast<LPARAM>(static_cast<INT_PTR>(s.y)));
+    }
+    if (st == gesture::State::Drawing) {
+        ::PostMessageW(self->m_notifyWindow, WM_APP_TRACE_POINT,
+                       static_cast<WPARAM>(static_cast<INT_PTR>(p.x)),
+                       static_cast<LPARAM>(static_cast<INT_PTR>(p.y)));
+    }
+    self->m_prevState = st;
+
+    // 有封存好的结果就立刻通知宿主（否则要等 50ms 的定时器）。
+    if (self->m_machine.hasReady()) {
+        ::PostMessageW(self->m_notifyWindow, WM_APP_GESTURE_DONE, 0, 0);
     }
 
     if (consume) {
