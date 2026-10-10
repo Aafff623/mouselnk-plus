@@ -242,14 +242,23 @@ owner 于 2026-10-10 放宽逆向边界后（见 `docs/adr/0004-reverse-engineer
 - **静态链接的库**【实测】：**LibTomCrypt + LibTomMath**（`LTC_*`/`CRYPT_*`/`ecc_point`/`fortuna`/`twofish`/`rijndael`/`whirlpool`/`LTM_DESC` 等）、**Mongoose**（`mg_mgr_poll`/`mg_open_listener`/`mg_ws_send`/`mg_ws_cb`）、**GDI+**（`Gdip*`）、**WebView2**（`EBWebView`/`WEBVIEW2_*`/`EmbeddedBrowserWebView.dll`）、**ATL/WTL**（`atlthunk.dll`/`AtlThunk_*`）、**WinINet**、**WMI**（`WmiSetBrightness`）、**DWM 缩略图**、**WinMM/MCI**。**无 Lua**（后期版本确实移除了内嵌 Lua）。
 - **钩子**【实测】：主初始化函数在启动时装两个低级钩子 —— `SetWindowsHookExW(0xd /*WH_KEYBOARD_LL*/, …)` 与 `SetWindowsHookExW(0xe /*WH_MOUSE_LL*/, …)`，装在主 UI 线程（该线程自己跑消息循环）。
 - **没有任何钩子存活/重装/看门狗逻辑**，也没有 `WM_POWERBROADCAST`、`GUID_CONSOLE_DISPLAY_STATE`、会话解锁相关字符串【实测】。→ 这**印证**了本工程把「钩子存活看门狗」（T-0033）标为**规格外、来自调研**：MouseInc 自身没做这件事，「手势莫名失效、重启就好」是它真实未处理的缺口。
-- **识别算法**【实测】：模板加载把配置里的扁平 int 数组按点对转 double；等距重采样用 `总长 / 100.0` 作步长；方向特征逐段取 `atan2(dy, dx)` 得到 **100 维**向量，并在存储前校验元素数 `== 100`。**与本工程 `src/Recognizer.*` 的实现一致**（我们 101 点 → 100 维方向）。评分公式与阈值所在的比较函数本轮未定位，仍以作者规格为准（规格与实测不冲突）。
+- **识别算法**【实测，全链路验证】：模板加载把配置里的扁平 int 数组按点对转 double；等距重采样用 `总长 / 100.0` 作步长；方向特征逐段取 `atan2(dy, dx)` 得到 **100 维**向量，并在存储前校验元素数 `== 100`。评分函数 `FUN_0044c28a` 逐字确认：`threshold = (Sensitive/100)×30 + 60`；环形最短角差 `|d| > π → d = π − (|d| − π)`；`score = |(Σ|d| / 100) × (100/π) − 100|`，即 `100 × (1 − meanDiff/π)`；`Sensitive` 默认 `0x32 = 50`。**与作者规格的公式逐字一致，也与本工程 `src/Recognizer.*` 的实现一致**（我们 101 点 → 100 维方向）。
 - **动作分发次序**【实测】：`window → postmessage → internal → sendkeys → sendkeydown → sendkeyup → activate → sendclick → mousemove → setclipboard → execute → execute2 → screenshot → snapshot → getclipboard → screenshothq → algorithm → explorer → setbrightness → regset`，全部不匹配则记 `unknown action [%S]`。次序决定前缀重叠时的归属。
 - **设置服务与前端协议**【实测】：`WSAStartup` → Mongoose `mg_mgr_init`（DNS 设为 `udp://8.8.8.8:53` 与 `udp://[2001:4860:4860::8888]:53`）→ 读回动态监听端口存为 `%port%`（日志 `SettingService %d`）→ `mg_mgr_poll` 循环。前端（随包 Vue/webpack bundle）连 **`ws://127.0.0.1:<port>/ws`**。WebView2 启动参数含 `--user-data-dir`、`--window-position/size`，并用 `--host-resolver-rules="MAP tools.shuax.com ~NOTFOUND"` **屏蔽在线站点、强制本地设置包**。
-- **注册的窗口类**【实测】：`PopupWindow`、`GestureWindow`、`KeycastWindow`、`CapslockWindow`、`ImeWindow`、`ClipboardWindow`、`QuickWindow`、`HotkeysWindow`、`TrayWindow`、`ScreenshotWindowHQ`（另有 `PipWindow`/`SnapshotWindow`/`ReferenceWindow`/`NewGestureWindow`）。
+- **窗口**【实测，含动态纠正】：MouseInc **只注册一个窗口类 `MouseInc`**，各功能窗口靠**标题**区分 —— 实测枚举到 `GestureWindow`、`PopupWindow`、`KeycastWindow`、`CapslockWindow`、`ImeWindow`、`ClipboardWindow`、`QuickWindow`、`HotkeysWindow`、`TrayWindow`、`ScreenshotWindowHQ`、`NewGestureWindow`、`MouseInc`（另有静态可见的 `PipWindow`/`SnapshotWindow`/`ReferenceWindow`）。**注意：这些是窗口标题而非类名**（`FUN_00466dbb` 的 `L"GestureWindow"` 参数是窗口名，类由 `FUN_00466ea7` 统一注册）。
 - **配置键名补全**【实测】（补充本文档前面的记录）：绑定形状为 `UpActions`/`DownActions`/`PressActions` 三组；手势键名是 **`Sensitive`**（不是 `Sensitivity`）、`Timeout`、`Offset`、`RestoreEvent`、`AddMode`；功能开关 `AutoClip`/`FastPaste`/`AltDrag`/`QuickJump`/`AutoRun`/`ShowIme`/`ShowTrayIcon`/`Keycast`/`KeySound`/`KeySoundIndex`/`VolumeSoundIndex`/`CapsLockLed`/`CapsUnlock`/`WheelNatural`/`WheelThrough`/`WheelAltControl`；提示键 `AutorunTips`/`UpdateTips`/`FailedTips`/`ExcludeTips`/`BrightnessTips`；日志格式 `[MouseInc][%d]%s`。
 - **更新机制**【实测】：清单 `https://update.shuax.com/MouseInc/update.json`；串 `manifest.json`/`parse manifest error %S`/`manifest unzip error %X,%d`/`%S verify error`/`Download %d`；状态 `CheckUpdate`/`UpdateCheckError`/`UpdateCheckLatest`/`UpdateSuccess`。**校验算法的具体形式未取到**。
 - **OCR**【实测】：三个网络端点 —— `https://ocr.shuax.com`（自有）、`http://aidemo.youdao.com/ocrapi1`（有道）、PaddleHub 的 `chinese_ocr_db_crnn_mobile`。→ 主程序**不内嵌推理引擎**，印证本工程「系统 OCR + 按需下载可选组件、不调作者接口」的选型。
 - **应用规则里的浏览器进程名**【实测】：`Chrome`/`Chrome360`/`ChromeHTM`/`Chromium`/`ChromiumHTM`/`MSEdge`/`MSEdgeB`/`MSEdgeD`/`MSEdgeSS`/`MSEdgeHTM`/`FirefoxHTML-`/`iexplore.exe`/`Vivaldi`/`VivaldiHTM`。
+
+### MouseInc 动态交叉验证（2026-10-10，非提权运行实测）
+
+静态分析之后补做了一次运行观察（方法来自社区 RE 工作流的「静态↔动态交叉验证」阶段），实测结果：
+
+- **监听端口**：`127.0.0.1:8828`（单条 TCP 监听，仅回环）→ **印证** Mongoose 设置服务确实在跑。注意端口不是 OS 分配的临时端口（49152+），说明 MouseInc 自己选定了端口；`%port%` 就是它。
+- **窗口枚举**：确认了全部功能窗口存在（见上一条），并**纠正**了「注册多个窗口类」这一静态误判 —— 实际只有一个类 `MouseInc`，其余是标题。
+- 启动 6 秒时：线程 26、工作集 32.1 MB。**与本文档前面记录的「空闲 6.0 MB / 21 线程」不矛盾但口径不同**（那次是空闲态多次采样；这次是刚启动未回落），引用时必须写明口径。
+- 另确认 GDI+ 会自建一个隐藏窗口（`GDI+ Hook Window Class`），这是 GDI+ 的正常行为，不是 MouseInc 的窗口。
 
 ### Aitiy 1.0.5（PE32+/x64，27.6 MB；含约 15 MB 静态链接的 ONNX Runtime）
 
@@ -263,6 +272,7 @@ Ghidra 全量分析超出 REA 的 provider 超时（330 s），但 **Aitiy 保�
 - **配置寻址**【实测】：`aitiy.config.get(path)` 的 path 是**斜杠分隔**（`/find_mouse/color`、`/key_echo/enabled`…），对应 `config.json` 的 `snake_case` 结构 —— 与 MouseInc 的扁平 PascalCase 键是两套方案。
 - **Infinite Mouse**【实测】：`InfiniteMouseManager`/`InfiniteMouseCursor`、`ApplyRemoteClipboardClear`、`PollClipboard`、`CaptureDragCandidate`、`Aitiy.RemoteClipboard.Origin`、**`_aitiy._tcp.local`（mDNS 发现）**，配合 `bcrypt`/`mswsock`/`winhttp`。
 - **其它**【实测】：窗口属性 `Aitiy.WindowRole`；内联 SVG 图标用 `stroke="#8b5cf6"`（与本文档记录的 Aitiy 品牌紫一致）；exe 内**无中文串**（界面文案全在 `language.json`）。
+- **功能面全集**【实测】：`language.json` 按语言分包（10 语言），每包同一棵键树。中文包实测出 **17 个设置分区**（`infinite_mouse`/`script_editor`/`gesture`/`hotkey`/`find_mouse`/`selection_toolbar`/`global_block`/`key_echo`/`edge`/`ocr`/`schedule`/`input_stats`/`actions`…）与**约 90 个内置命名动作**（编辑浏览、窗口、截图/贴图/OCR、系统音量亮度、搜索翻译、排除、提示类等）；另有 `screenshot`（工具条 24 项/选项 13 项）、`long_screenshot`（自动滚动拼接）、`guide`（4 步引导）、`telemetry`（**Aitiy 有遥测**）、`macos`（权限项 → **跨平台**）。可直接用于做功能覆盖对照表。
 
 **对本工程的直接含义**：T-0006 的识别引擎已获二进制级验证；T-0033 的看门狗是真实缺口而非臆测；动作族判定次序可照 MouseInc `FUN_0045f553` 对齐；设置通道「Mongoose + 动态端口」我们**理解但不照搬**（改用 WebView2 虚拟主机映射，少一个依赖与端口）；Aitiy 的 ONNX+PP-OCR 与自研 `zui::` 渲染栈被证实是其重量来源，**强化**了本工程「主程序不背推理引擎、OCR 走按需下载可选组件」的硬约束。
 

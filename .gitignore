@@ -47,3 +47,9 @@ CMakeUserPresets.json
 
 # ---- local index / tooling caches ----
 /.codegraph/
+
+# 第三方逆向技能（临时评估用；与本工程产品无关，不入库）及其安装产物
+/.agents/skills/reverse-engineering/
+/.zcode/
+/.claude/
+/skills-lock.json
