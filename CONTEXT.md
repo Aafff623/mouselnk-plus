@@ -11,9 +11,9 @@
 
 边界：
 
-- 本工程**不做** MouseInc/Aitiy 二进制的反编译、反汇编或逐字节复制（作者明确要求独立实现，并使用自己的名称、图标、界面和服务地址）。本机两个程序是**行为参照（黑盒 oracle）**与取证对象，不是代码来源。
+- 本工程**不做** MouseInc/Aitiy 代码、资源与产物的逐字节复制，也不把反编译产物搬进本工程。**反编译/反汇编允许用于理解实现机制**（owner 2026-10-10 授权放宽，边界见 `AGENTS.md`），交付物始终是独立实现并使用自己的名称、图标、界面和服务地址。本机两个程序既是**行为参照（黑盒 oracle）**也是静态分析对象，不是代码来源。
 - 「复原」的验收标准是**可观察行为与架构分层一致**，不是二进制产物一致。
-- 合法的骨架来源见 `AGENTS.md` 的「『复原 MouseInc』的合法来源」一节——其中 `sanan2015/MouseInc`（MIT，v2.1 完整源码）是**唯一的真源码参考**，用于工程结构、钩子处理与手势引擎的组织方式。
+- 合法的骨架来源见 `AGENTS.md` 的「『复原 MouseInc』的合法来源」一节——其中 `sanan2015/MouseInc`（MIT，v2.1 完整源码）是**真源码参考**，用于工程结构、钩子处理与手势引擎的组织方式。
 
 ## 作者给定的技术路线（需求基准，已确定）
 
@@ -233,6 +233,39 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 
 
 
+## 逆向取证结论（2026-10-10，REA 6.3.0 + Ghidra 12.1.4 headless）
+
+owner 于 2026-10-10 放宽逆向边界后（见 `docs/adr/0004-reverse-engineering-boundary.md`），对两个参考程序做了静态分析。以下只记录**结论**，反编译产物与完整报告在 `temp/re/`（本地材料，不入 Git）。证据分级同全文：【实测】= 反编译/字符串直接读到。
+
+### MouseInc 2.13.4（PE32/x86，.text 651,264 B，4,537 个函数，2,015 条字符串，无符号）
+
+- **静态链接的库**【实测】：**LibTomCrypt + LibTomMath**（`LTC_*`/`CRYPT_*`/`ecc_point`/`fortuna`/`twofish`/`rijndael`/`whirlpool`/`LTM_DESC` 等）、**Mongoose**（`mg_mgr_poll`/`mg_open_listener`/`mg_ws_send`/`mg_ws_cb`）、**GDI+**（`Gdip*`）、**WebView2**（`EBWebView`/`WEBVIEW2_*`/`EmbeddedBrowserWebView.dll`）、**ATL/WTL**（`atlthunk.dll`/`AtlThunk_*`）、**WinINet**、**WMI**（`WmiSetBrightness`）、**DWM 缩略图**、**WinMM/MCI**。**无 Lua**（后期版本确实移除了内嵌 Lua）。
+- **钩子**【实测】：主初始化函数在启动时装两个低级钩子 —— `SetWindowsHookExW(0xd /*WH_KEYBOARD_LL*/, …)` 与 `SetWindowsHookExW(0xe /*WH_MOUSE_LL*/, …)`，装在主 UI 线程（该线程自己跑消息循环）。
+- **没有任何钩子存活/重装/看门狗逻辑**，也没有 `WM_POWERBROADCAST`、`GUID_CONSOLE_DISPLAY_STATE`、会话解锁相关字符串【实测】。→ 这**印证**了本工程把「钩子存活看门狗」（T-0033）标为**规格外、来自调研**：MouseInc 自身没做这件事，「手势莫名失效、重启就好」是它真实未处理的缺口。
+- **识别算法**【实测】：模板加载把配置里的扁平 int 数组按点对转 double；等距重采样用 `总长 / 100.0` 作步长；方向特征逐段取 `atan2(dy, dx)` 得到 **100 维**向量，并在存储前校验元素数 `== 100`。**与本工程 `src/Recognizer.*` 的实现一致**（我们 101 点 → 100 维方向）。评分公式与阈值所在的比较函数本轮未定位，仍以作者规格为准（规格与实测不冲突）。
+- **动作分发次序**【实测】：`window → postmessage → internal → sendkeys → sendkeydown → sendkeyup → activate → sendclick → mousemove → setclipboard → execute → execute2 → screenshot → snapshot → getclipboard → screenshothq → algorithm → explorer → setbrightness → regset`，全部不匹配则记 `unknown action [%S]`。次序决定前缀重叠时的归属。
+- **设置服务与前端协议**【实测】：`WSAStartup` → Mongoose `mg_mgr_init`（DNS 设为 `udp://8.8.8.8:53` 与 `udp://[2001:4860:4860::8888]:53`）→ 读回动态监听端口存为 `%port%`（日志 `SettingService %d`）→ `mg_mgr_poll` 循环。前端（随包 Vue/webpack bundle）连 **`ws://127.0.0.1:<port>/ws`**。WebView2 启动参数含 `--user-data-dir`、`--window-position/size`，并用 `--host-resolver-rules="MAP tools.shuax.com ~NOTFOUND"` **屏蔽在线站点、强制本地设置包**。
+- **注册的窗口类**【实测】：`PopupWindow`、`GestureWindow`、`KeycastWindow`、`CapslockWindow`、`ImeWindow`、`ClipboardWindow`、`QuickWindow`、`HotkeysWindow`、`TrayWindow`、`ScreenshotWindowHQ`（另有 `PipWindow`/`SnapshotWindow`/`ReferenceWindow`/`NewGestureWindow`）。
+- **配置键名补全**【实测】（补充本文档前面的记录）：绑定形状为 `UpActions`/`DownActions`/`PressActions` 三组；手势键名是 **`Sensitive`**（不是 `Sensitivity`）、`Timeout`、`Offset`、`RestoreEvent`、`AddMode`；功能开关 `AutoClip`/`FastPaste`/`AltDrag`/`QuickJump`/`AutoRun`/`ShowIme`/`ShowTrayIcon`/`Keycast`/`KeySound`/`KeySoundIndex`/`VolumeSoundIndex`/`CapsLockLed`/`CapsUnlock`/`WheelNatural`/`WheelThrough`/`WheelAltControl`；提示键 `AutorunTips`/`UpdateTips`/`FailedTips`/`ExcludeTips`/`BrightnessTips`；日志格式 `[MouseInc][%d]%s`。
+- **更新机制**【实测】：清单 `https://update.shuax.com/MouseInc/update.json`；串 `manifest.json`/`parse manifest error %S`/`manifest unzip error %X,%d`/`%S verify error`/`Download %d`；状态 `CheckUpdate`/`UpdateCheckError`/`UpdateCheckLatest`/`UpdateSuccess`。**校验算法的具体形式未取到**。
+- **OCR**【实测】：三个网络端点 —— `https://ocr.shuax.com`（自有）、`http://aidemo.youdao.com/ocrapi1`（有道）、PaddleHub 的 `chinese_ocr_db_crnn_mobile`。→ 主程序**不内嵌推理引擎**，印证本工程「系统 OCR + 按需下载可选组件、不调作者接口」的选型。
+- **应用规则里的浏览器进程名**【实测】：`Chrome`/`Chrome360`/`ChromeHTM`/`Chromium`/`ChromiumHTM`/`MSEdge`/`MSEdgeB`/`MSEdgeD`/`MSEdgeSS`/`MSEdgeHTM`/`FirefoxHTML-`/`iexplore.exe`/`Vivaldi`/`VivaldiHTM`。
+
+### Aitiy 1.0.5（PE32+/x64，27.6 MB；含约 15 MB 静态链接的 ONNX Runtime）
+
+Ghidra 全量分析超出 REA 的 provider 超时（330 s），但 **Aitiy 保留了 MSVC RTTI 符号**，字符串提取即可拿到完整内部类结构（`temp/re/aitiy_strings.json`，79,977 条唯一串）。
+
+- **自研 UI 框架 `zui::`**【实测】（62 个 RTTI 类）：Flutter 风格的保留式组件树 —— `Widget`/`Component`/`Column`/`Row`/`Stack`/`Container`/`ListView`/`Overlay`/`RepaintBoundary`/`AnimatedSwitcher`/`Button`/`Checkbox`/`Switch`/`Slider`/`TextField`/`ImageView`/`Dialog`/`Tooltip`/`CodeEditor`；事件 `MouseEvent`/`KeyEvent`/`WheelEvent`/`FocusEvent`/`CompositionEvent`；交互 `GestureDetector`/`Draggable`/`DragTarget`；作用域 `CommandScope`/`FocusScope`；表面 `Surface`/`SoftwareSurface`/**`Win32AngleSurface`**/`RecoveringSurface`；基类 `RefBase`/`RefImpl`。→ **ANGLE 是 zui 的渲染后端之一**（与 PE 导入表的 `d3dcompiler_43/46/47`、`libEGL/libGLESv2` 吻合）。
+- **应用层 `aitiy::`**【实测】：命名规律 `AV*`=View、`AU*`=Utility、`*Service`=服务。服务含 `AVGestureService`/`AVInputService`/`AVKeyEchoService`/`AVScreenshotService`/`AVLongScreenshotService`/`AVSelectionService`/`AVSettingsService`/`AVTrayService`/`AVPinService`/`AVFindMouseService`/`AVImageEditorService`/`InfiniteMouseManager`/`ScheduleManager`。
+- **手势路径**【实测】：`GestureService` + `zui::Window` 里的 `GestureCanvas`；`GestureWindow::Open/Hide/**Prewarm**/Append(vector<zui::Vector2>)/FinishTrail/Update(GestureOverlaySnapshot)`，`GestureOverlaySurface::UpdateResult(bool)`。轨迹是**成批 Append**，且**预热窗口**消除首次延迟 —— 与 MouseInc 的「每点重绘手写分层窗口」是两种实现，`Prewarm` 思路值得借鉴到 T-0005。
+- **内嵌引擎**【实测】：**Lua 5.5.1**（`$LuaVersion: Lua 5.5.1 Copyright (C) 1994-2026 Lua.org, PUC-Rio`、`LuaRuntime@aitiy`）—— 注意 MouseInc 后期**移除**了 Lua，Aitiy 又把它作为动作引擎；**ONNX Runtime + ONNX protobuf**（`onnx::OpSchema`/`InferenceContext`/算子文档语料）；**PP-OCRv6 tiny**（`model_name: PP-OCRv6_tiny_det`、`PP-OCRv6_tiny_rec`）→ **证实**本文档前面「6.4 MB ≈ tiny det+rec」的推断；**UI Automation**（`UIAutomationCore.DLL`/`OLEACC.dll`）。
+- **Lua 动作 API**【实测】：`aitiy.app.{exclude_target,exit,open_data_folder,open_settings,toggle_paused,toggle_tray_icon}`、`aitiy.clipboard.{get_text,set_text}`、`aitiy.config.{get,set,toggle}`、`aitiy.image.{edit,pin}`、`aitiy.keyboard.{is_down,send}`、`aitiy.mouse.{click,highlight,move_to}`、`aitiy.screen.capture`、`aitiy.window.{crop_lock,clear_crop_locks,post_message,set_topmost,toggle_topmost}`、`aitiy.system.toggle_desktop_icons`、`aitiy.json.array`。
+- **配置寻址**【实测】：`aitiy.config.get(path)` 的 path 是**斜杠分隔**（`/find_mouse/color`、`/key_echo/enabled`…），对应 `config.json` 的 `snake_case` 结构 —— 与 MouseInc 的扁平 PascalCase 键是两套方案。
+- **Infinite Mouse**【实测】：`InfiniteMouseManager`/`InfiniteMouseCursor`、`ApplyRemoteClipboardClear`、`PollClipboard`、`CaptureDragCandidate`、`Aitiy.RemoteClipboard.Origin`、**`_aitiy._tcp.local`（mDNS 发现）**，配合 `bcrypt`/`mswsock`/`winhttp`。
+- **其它**【实测】：窗口属性 `Aitiy.WindowRole`；内联 SVG 图标用 `stroke="#8b5cf6"`（与本文档记录的 Aitiy 品牌紫一致）；exe 内**无中文串**（界面文案全在 `language.json`）。
+
+**对本工程的直接含义**：T-0006 的识别引擎已获二进制级验证；T-0033 的看门狗是真实缺口而非臆测；动作族判定次序可照 MouseInc `FUN_0045f553` 对齐；设置通道「Mongoose + 动态端口」我们**理解但不照搬**（改用 WebView2 虚拟主机映射，少一个依赖与端口）；Aitiy 的 ONNX+PP-OCR 与自研 `zui::` 渲染栈被证实是其重量来源，**强化**了本工程「主程序不背推理引擎、OCR 走按需下载可选组件」的硬约束。
+
 ## 作者的设计取向与稳定性来源（调研结论）
 
 四份专题调研（`temp/research/mouseinc-deep-dive.md`、`aitiy-deep-dive.md`、`community-voice.md`、`stability-and-design.md`）与综述（`design-thinking-synthesis.md`）得出的结论。**这些解释了我们为什么要守住「轻量」，不是背景故事。**
@@ -299,7 +332,7 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 
 ## Hard constraints
 
-1. **法律/来源边界**：不得复制、反编译、反汇编参考程序；名称、图标、界面、服务地址全部自建（作者明确要求）。
+1. **法律/来源边界**：不得复制参考程序的代码、资源或产物，不得把反编译产物搬进本工程；名称、图标、界面、服务地址全部自建。**反编译/反汇编用于理解机制是允许的**（owner 2026-10-10 授权放宽）；反编译产物属本地材料，放 `temp/`，不入 Git。
 2. **轻量与便携是产品定义的一部分**：用户选择留在 MouseInc 的首要原因就是它「轻量、稳定」。MouseInc 2.13.4 主程序 1.19 MiB；Aitiy 主程序 26.3 MiB 且社区实测常驻内存约 260 MB，是被最集中批评的点。本工程必须守住「单文件、无运行库依赖、配置随程序目录释放」这条线。
 3. **工具链**：C++20 + MSVC v143 + Windows SDK（作者指定）。本机原本没有，2026-10-08 开始安装 VS2022 Build Tools；工程系统用 CMake，生成器 `Visual Studio 17 2022` x64。
 4. **权限模型**：Vista 以上存在 UIPI，低完整性级别进程无法操作高完整性级别窗口（例：任务管理器在前台时普通权限的程序无法正常处理右键）。MouseInc 的官方解法是「强烈推荐以管理员权限运行」。Aitiy 默认 `startup_admin: true`。
@@ -377,6 +410,7 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 - `docs/adr/0001-toolchain-and-build-system.md` —— 编译工具链与工程系统选型（MSVC v143 + CMake）。
 - `docs/adr/0002-config-schema.md` —— 内部配置 schema 采用作者规格的新格式，MouseInc.json 仅作一次性导入源。
 - `docs/adr/0003-dependency-strategy.md` —— 依赖策略：系统自带优先、最少第三方；本工程采用 MIT 许可证。
+- `docs/adr/0004-reverse-engineering-boundary.md` —— 逆向边界：允许反编译/反汇编用于理解机制（owner 2026-10-10 授权），仍禁止逐字节复制与搬运反编译产物。
 
 ## 待确认
 

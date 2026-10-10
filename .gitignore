@@ -8,6 +8,7 @@
 /.mcp.json
 /.cursor/mcp.json
 /.vscode/mcp.json
+/.zcode/config.json
 
 # Common local secrets and generated output
 .env
