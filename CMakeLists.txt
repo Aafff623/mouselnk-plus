@@ -40,6 +40,7 @@ add_executable(mouselnk-plus WIN32
     src/Config.cpp
     src/Log.cpp
     src/GestureState.cpp
+    src/Recognizer.cpp
     src/Input.cpp
     src/app.rc
     # manifest 作为源文件交给 CMake，由链接器合并进唯一的 MANIFEST 资源
@@ -94,3 +95,33 @@ target_link_libraries(mouselnk-plus PRIVATE
 set_property(SOURCE src/app.rc APPEND PROPERTY OBJECT_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/app.ico;${CMAKE_CURRENT_SOURCE_DIR}/assets/app_paused.ico;${CMAKE_CURRENT_SOURCE_DIR}/resources/default-config.json"
 )
+
+# ---- 自动化测试（作者规格「十七、验证与交付」）----
+#
+# 测试 exe 只在开发/CI 构建，不进发行物，因此与「单文件 / 静态 CRT」的交付约束无关。
+# doctest 是单头文件（MIT，见 THIRD-PARTY-NOTICES.md），选型依据见 docs/execution-plan.md §2.2。
+enable_testing()
+
+add_executable(mouselnk-plus-tests
+    tests/test_main.cpp
+    tests/test_recognizer.cpp
+    src/Recognizer.cpp      # 纯逻辑，不依赖 Win32，可直接编进测试工程
+)
+
+target_include_directories(mouselnk-plus-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_include_directories(mouselnk-plus-tests SYSTEM PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party"   # doctest 有大量第三方告警，按 SYSTEM 屏蔽
+)
+
+target_compile_options(mouselnk-plus-tests PRIVATE
+    /W4
+    /permissive-
+    /Zc:__cplusplus
+    /Zc:preprocessor
+    /utf-8
+    /EHsc
+)
+
+add_test(NAME recognizer COMMAND mouselnk-plus-tests)

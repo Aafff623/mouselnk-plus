@@ -6,6 +6,7 @@
 |---|---|---|---|---|
 | **WTL**（Windows Template Library） | 10.0（`_WTL_VER 0x1000`） | **MS-PL** | 作者规格指定的窗口层（`CWindowImpl`、消息映射、`CMessageLoop`）；MouseInc 与本工程都用它 | vendored 头文件，`third_party/wtl/Include/`（20 个头文件），随包附 `MS-PL.txt` |
 | **nlohmann/json** | 3.12.0 | **MIT**（源文件内 `SPDX-License-Identifier: MIT`） | 作者规格指定的配置解析库；用于读写 UTF-8 配置 JSON | 单头文件，`third_party/nlohmann/json.hpp`（953 KB），来自 https://github.com/nlohmann/json/releases/tag/v3.12.0 |
+| **doctest** | 2.4.11 | **MIT** | 单元测试框架（作者规格「十七、验证与交付」要求自动化测试）。选型依据见 `docs/execution-plan.md` §2.2：单头文件、CMake/CTest 原生、模板开销最轻 | 单头文件，`third_party/doctest/doctest.h`（314 KB），来自 https://github.com/doctest/doctest/releases/tag/v2.4.11。**只编进测试 exe，不进发行物**（测试目标见 `CMakeLists.txt` 末尾） |
 
 ## WTL 的来源与许可证核实过程
 
