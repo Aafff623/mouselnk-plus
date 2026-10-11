@@ -39,20 +39,19 @@ Windows 桌面鼠标手势 / 鼠标增强工具。项目名 `mouselnk-plus`（�
    - 需要 Windows SDK（`Microsoft.VisualStudio.Component.Windows11SDK.26100`）
 2. **WTL 10.0** 已 vendored 到 `third_party/wtl/`，无需另外获取；其许可证见 `THIRD-PARTY-NOTICES.md`。
 
-**构建**（本机当前可用的路径）：
+**构建**（本机当前可用的路径，两条都验证通过）：
 
 ```bash
-# 需要在已应用 vcvars64 的环境里执行
+# 路径 A：Ninja 生成器（需在已应用 vcvars64 的环境里执行）
 cmake -S . -B build-ninja -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl
 cmake --build build-ninja
+
+# 路径 B：Visual Studio 生成器 + MSBuild（2026-10-11 修复 MSB8036 后可用）
+cmake -S . -B build-vs -G "Visual Studio 17 2022" -A x64
+cmake --build build-vs --config Release
 ```
 
-> **为什么用 Ninja 而不是 Visual Studio 生成器**：本机的 MSBuild 无法定位已安装的 Windows SDK（`MSB8036`），任何 C++ 工程经 MSBuild 都会失败，与本工程无关 —— 详见 `CONTEXT.md` 的「本机开发环境」。CMake 工程本身不依赖生成器，等该机器问题修复后可直接改用：
->
-> ```bash
-> cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-> cmake --build build --config Release
-> ```
+> 两条路径产出一致（同一 CMake 工程、同一编译器与开关）。曾因本机 MSBuild 无法定位已安装的 Windows SDK（`MSB8036`）而只能用 Ninja；根因是独立安装器漏装了 SDK 根目录的 `sdkmanifest.xml`，补齐后 MSBuild 路径恢复，详见 `CONTEXT.md` 的「本机开发环境」。现成脚本：`temp/scripts/build-ninja.bat` / `temp/scripts/build-vs.bat`。
 
 产物目标：单文件、无运行库依赖（静态 CRT，`/MT`）的 exe，常驻系统托盘。
 
