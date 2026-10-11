@@ -6,6 +6,8 @@
 #include <memory>
 #include <string>
 
+#include <wtsapi32.h>
+
 #include "Config.h"
 #include "Input.h"
 #include "Log.h"
@@ -589,14 +591,15 @@ void CApp::ShowAbout() {
         std::wstring(kAppTitle) + L" 0.1.0\n\n"
         L"Windows 鼠标手势 / 鼠标增强工具。\n"
         L"以 MouseInc 为骨架独立复现，并计划集成部分 Aitiy 特性。\n\n"
-        L"当前状态：阶段 1（托盘、单实例、暂停、开机启动、配置系统、鼠标钩子与手势状态机）。\n"
-        L"识别与动作执行尚未接入。\n\n"
+        L"当前状态：阶段 1（托盘、单实例、暂停、开机启动、配置系统、鼠标钩子与\n"
+        L"手势状态机、轨迹识别、动作引擎、钩子存活看门狗）。\n\n"
         L"配置文件：" + ToWide(store.Path()) + L"\n"
         L"存储模式：" + (store.IsPortable() ? L"便携（exe 同目录）" : L"用户目录") + L"\n"
         L"SchemaVersion：" + std::to_wstring(current.schemaVersion) + L"\n"
         L"鼠标钩子：" +
         std::wstring(input::Hook::Instance().installed() ? L"已安装" : L"未安装") +
         (input::Hook::Instance().paused() ? L"（已暂停）" : L"") + L"\n"
+        L"看门狗重装次数：" + std::to_wstring(input::Hook::Instance().reinstallCount()) + L"\n"
         L"日志：" + ToWide(logger::Path()) + L"\n\n"
         L"本程序不包含 MouseInc / Aitiy 的任何代码或资源。";
     ::MessageBoxW(nullptr, text.c_str(), kAppTitle, MB_OK | MB_ICONINFORMATION);
@@ -615,6 +618,20 @@ void CApp::ExitApp() {
 // ---- CMainWindow ----
 
 LRESULT CApp::CMainWindow::OnCreate(UINT, WPARAM, LPARAM, BOOL&) {
+    // 看门狗的恢复信号注册（T-0033）。两路都失败不致命：只是睡眠唤醒后
+    // 少一路自动重装的触发，Raw Input 探针仍然在跑。
+    if (!::WTSRegisterSessionNotification(m_hWnd, NOTIFY_FOR_THIS_SESSION)) {
+        logger::Warn("WTSRegisterSessionNotification 失败，收不到会话锁定/解锁信号（win32 错误 " +
+                     std::to_string(::GetLastError()) + "）");
+    }
+    // 返回值是注册句柄，必须留着给 UnregisterPowerSettingNotification 用
+    // （传窗口句柄会在 powrprof.dll 内崩溃——实测过，别再改回去）。
+    powerNotify = ::RegisterPowerSettingNotification(m_hWnd, &GUID_CONSOLE_DISPLAY_STATE,
+                                                     DEVICE_NOTIFY_WINDOW_HANDLE);
+    if (powerNotify == nullptr) {
+        logger::Warn("RegisterPowerSettingNotification 失败，收不到显示状态变化（win32 错误 " +
+                     std::to_string(::GetLastError()) + "）");
+    }
     return 0;
 }
 
@@ -625,7 +642,54 @@ LRESULT CApp::CMainWindow::OnClose(UINT, WPARAM, LPARAM, BOOL&) {
 }
 
 LRESULT CApp::CMainWindow::OnDestroy(UINT, WPARAM, LPARAM, BOOL&) {
+    ::WTSUnRegisterSessionNotification(m_hWnd);
+    if (powerNotify != nullptr) {
+        ::UnregisterPowerSettingNotification(powerNotify);
+        powerNotify = nullptr;
+    }
     ::PostQuitMessage(0);
+    return 0;
+}
+
+LRESULT CApp::CMainWindow::OnPowerBroadcast(UINT, WPARAM wParam, LPARAM lParam, BOOL&) {
+    // 三路恢复信号之一/二：电源唤醒与显示状态变化。
+    // Modern Standby 下 WM_DEVICECHANGE 不一定触发，显示状态这一路是主要判据
+    // （调研「现代待机后钩子失效」：需要 WM_POWERBROADCAST + GUID_CONSOLE_DISPLAY_STATE
+    // + 解锁事件三路汇聚）。
+    switch (wParam) {
+        case PBT_APMRESUMEAUTOMATIC:
+        case PBT_APMRESUMESUSPEND:
+            input::Hook::Instance().NotifyResumeSignal();
+            break;
+        case PBT_POWERSETTINGCHANGE: {
+            const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(lParam);
+            if (setting != nullptr && setting->PowerSetting == GUID_CONSOLE_DISPLAY_STATE &&
+                setting->DataLength >= sizeof(DWORD) && setting->Data[0] != 0) {
+                // Data[0]：0=灭屏 1=亮屏 2=变暗。非 0 即「屏幕亮了」。
+                input::Hook::Instance().NotifyResumeSignal();
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return TRUE;
+}
+
+LRESULT CApp::CMainWindow::OnSessionChange(UINT, WPARAM wParam, LPARAM, BOOL&) {
+    // 三路恢复信号之三：会话解锁。锁定期间看门狗不判定（锁屏输入不经过本会话
+    // 的低级钩子，继续判定会把「已锁定」误报成「钩子被摘」）。
+    switch (wParam) {
+        case WTS_SESSION_LOCK:
+            input::Hook::Instance().NotifySessionLocked(true);
+            break;
+        case WTS_SESSION_UNLOCK:
+            input::Hook::Instance().NotifySessionLocked(false);
+            input::Hook::Instance().NotifyResumeSignal();
+            break;
+        default:
+            break;
+    }
     return 0;
 }
 

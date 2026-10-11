@@ -72,8 +72,8 @@ DWORD Hook::ThreadMain() {
     m_threadId = ::GetCurrentThreadId();
 
     // 必须在本线程装钩：低级钩子被投递到安装线程的消息队列。
-    HHOOK hook = ::SetWindowsHookExW(WH_MOUSE_LL, &Hook::MouseProc, ::GetModuleHandleW(nullptr), 0);
-    if (hook == nullptr) {
+    m_hook = ::SetWindowsHookExW(WH_MOUSE_LL, &Hook::MouseProc, ::GetModuleHandleW(nullptr), 0);
+    if (m_hook == nullptr) {
         logger::Error("SetWindowsHookEx(WH_MOUSE_LL) 失败，win32 错误 " +
                       std::to_string(::GetLastError()));
         m_running.store(false);
@@ -83,6 +83,10 @@ DWORD Hook::ThreadMain() {
     m_installed.store(true);
     m_startState.store(1);
 
+    // 钩子存活看门狗：窗口/计时器/Raw Input 都绑定本线程。失败不致命——
+    // 钩子照常工作，只是失去「被静默移除后自动重装」的能力。
+    m_watchdog.Start([this] { ReinstallHook(); });
+
     MSG msg{};
     while (::GetMessageW(&msg, nullptr, 0, 0) > 0) {
         if (msg.hwnd == nullptr) {
@@ -91,6 +95,15 @@ DWORD Hook::ThreadMain() {
                 m_machine.Reset();
             } else if (msg.message == kThreadMsgReinjected) {
                 m_machine.NoteReinjected();
+            } else if (msg.message == Watchdog::kThreadMsgResumeSignal) {
+                m_watchdog.ArmRetryLadder();
+            } else if (msg.message == Watchdog::kThreadMsgSessionLock) {
+                const bool locked = msg.wParam != 0;
+                m_watchdog.SetSessionLocked(locked);
+                if (!locked) {
+                    // 解锁本身也是恢复信号：安排阶梯重装
+                    m_watchdog.ArmRetryLadder();
+                }
             }
             continue;
         }
@@ -98,11 +111,34 @@ DWORD Hook::ThreadMain() {
         ::DispatchMessageW(&msg);
     }
 
+    // 收尾顺序：先停看门狗（销毁它的窗口与 Raw Input 注册），再卸钩子。
+    m_watchdog.Stop();
     m_installed.store(false);
     // 卸载同样在本线程执行（与安装配对的唯一安全位置）
-    ::UnhookWindowsHookEx(hook);
+    if (m_hook != nullptr) {
+        ::UnhookWindowsHookEx(m_hook);
+        m_hook = nullptr;
+    }
     m_running.store(false);
     return 0;
+}
+
+void Hook::ReinstallHook() {
+    // 只能由钩子线程调用（看门狗计时器上下文）。卸旧钩子再装新钩子，
+    // 中途漏掉的事件只是不通知我们，系统不会丢，其它钩子也照常收到。
+    if (m_hook != nullptr) {
+        ::UnhookWindowsHookEx(m_hook);
+        m_hook = nullptr;
+    }
+    m_hook = ::SetWindowsHookExW(WH_MOUSE_LL, &Hook::MouseProc, ::GetModuleHandleW(nullptr), 0);
+    if (m_hook == nullptr) {
+        m_installed.store(false);
+        logger::Error("看门狗重装钩子失败，win32 错误 " + std::to_string(::GetLastError()));
+        return;
+    }
+    m_installed.store(true);
+    logger::Info("看门狗已重装鼠标钩子（累计 " +
+                 std::to_string(m_watchdog.reinstallCount() + 1) + " 次）");
 }
 
 LRESULT CALLBACK Hook::MouseProc(int code, WPARAM wParam, LPARAM lParam) {
@@ -115,6 +151,10 @@ LRESULT CALLBACK Hook::MouseProc(int code, WPARAM wParam, LPARAM lParam) {
     if (ms == nullptr) {
         return ::CallNextHookEx(nullptr, code, wParam, lParam);
     }
+
+    // 看门狗探针：任何一次回调都说明钩子活着（自己注入的事件也同样经过本钩子，
+    // 所以放在注入标记判断之前）。只是一次 DWORD 写入——不是锁、不是分配、不是 I/O。
+    self->m_watchdog.NoteHookEvent();
 
     // 自己补发的事件：直接放行，绝不再喂给状态机（否则递归）。
     if (ms->dwExtraInfo == kSelfInjectionTag) {

@@ -44,6 +44,7 @@ add_executable(mouselnk-plus WIN32
     src/Actions.cpp
     src/Overlay.cpp
     src/Input.cpp
+    src/Watchdog.cpp
     src/app.rc
     # manifest 作为源文件交给 CMake，由链接器合并进唯一的 MANIFEST 资源
     # （声明 Common Controls v6、PerMonitorV2 DPI 感知、asInvoker）。
@@ -90,6 +91,7 @@ target_link_libraries(mouselnk-plus PRIVATE
     gdi32
     gdiplus     # 轨迹浮层的绘制（作者规格指定的绘制栈）
     advapi32    # 注册表（开机启动项）
+    wtsapi32    # 会话锁定/解锁通知（看门狗恢复信号，T-0033）
 )
 
 # 图标与默认配置都被 .rc 引用，改它们时要触发重新编译资源，否则会静默沿用旧内容。
@@ -108,6 +110,7 @@ enable_testing()
 add_executable(mouselnk-plus-tests
     tests/test_main.cpp
     tests/test_recognizer.cpp
+    tests/test_watchdog.cpp
     src/Recognizer.cpp      # 纯逻辑，不依赖 Win32，可直接编进测试工程
 )
 

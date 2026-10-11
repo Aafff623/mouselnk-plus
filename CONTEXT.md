@@ -220,6 +220,17 @@ Aitiy 配置的顶层键：`actions`、`gesture`、`gesture_list`、`match_globa
 - **执行线程模型**：动作链在**单个后台工作线程上串行执行**（`CApp::m_actionThread` + 队列 + 条件变量），绝不阻塞钩子回调与消息循环；`Delay`/`Execute`/`SendKeys` 都跑在这里。需要动 UI 的动作（Internal 的设置/重载/暂停/退出、ShowTips）通过 `PostMessage(WM_APP_COMMAND / WM_APP_SHOW_TIP)` 回到 UI 线程。退出时先卸钩子、再停动作线程、收浮层，最后销毁窗口与托盘。
 - **轨迹实时投递**：钩子回调只做「喂状态机 + `PostMessage` 一个轨迹点」，绘制全部在 App 线程；App 收到后先抽干队列里积压的同类消息再重绘一次，避免高频移动导致重绘风暴。**钩子回调里不做任何读取跨线程缓冲区的操作**。
 
+### 钩子存活看门狗（T-0033 已实现并真机验证）
+
+针对「低级钩子被系统静默移除」这一最致命失效模式（回调超 300ms、睡眠唤醒、高负载都会触发，HHOOK 仍非 NULL 但再也不触发）的自动恢复机制。代码在 `src/Watchdog.*`，与 `src/Input.*` 的钩子线程集成。
+
+- **判定机制（唯一有证据的方式）**：Raw Input 旁路探针。在钩子线程建 message-only 窗口，`RegisterRawInputDevices`（`usUsagePage=1`/`usUsage=2`/`dwFlags=RIDEV_INPUTSINK`，**不用危险的 `RIDEV_NOLEGACY`**）收 `WM_INPUT`。两条独立投递路径对照：**Raw Input 在动（2s 内）+ 钩子静默（3s 以上）⇒ 钩子被丢弃**；两者都静默 ⇒ 只是没人动鼠标，不动作。探针判定是纯函数 `Watchdog::ShouldReinstallForSilence`，进单元测试。
+- **三路恢复信号在 App 主窗口汇聚**后转投钩子线程：`WM_POWERBROADCAST`（`PBT_APMRESUMEAUTOMATIC`/`PBT_APMRESUMESUSPEND`）+ `RegisterPowerSettingNotification(GUID_CONSOLE_DISPLAY_STATE)` 的 `PBT_POWERSETTINGCHANGE`（Modern Standby 唤醒时 `WM_DEVICECHANGE` 不一定来，这路是主要判据）+ `WTSRegisterSessionNotification` 的 `WM_WTSSESSION_CHANGE`（会话解锁）。收到后按 **0.5s/3s/10s 阶梯重装**（无条件重装：唤醒时用户可能还没动鼠标，探针无从判定），**5s 去重**。重装 = 卸旧钩子再装新钩子，在钩子线程同步执行，间隙亚毫秒级。
+- **两个防误报设计**（都有实测来源）：① **会话锁定期间探针不判定**——锁屏上的鼠标活动不经过本会话的低级钩子，继续判定会把「已锁定」误报成「钩子被摘」；② **启动 15s 宽限期**——实测 `RegisterPowerSettingNotification` **注册后会补发一条当前显示状态的 `PBT_POWERSETTINGCHANGE`**（不是真实变化），每次启动都会触发一次阶梯重装；且钩子是刚装上的，重装没有意义。宽限期只压制阶梯，探针不受影响。
+- **可观测性**：每次重装落日志（原因 + 第几次 + 结果）；每 5 分钟一条状态心跳（钩子事件数 / Raw Input 数 / 重装次数），用户可从日志确认两条投递路径都活着；About 对话框显示重装次数。
+- **实测结论**（2026-10-11）：合成 `PBT_APMRESUMEAUTOMATIC` 后阶梯重装在 +1s/+3s/+10s 触发（计时器 1s 粒度）；重装后注入右键上划手势，识别与动作执行正常；鼠标活动期间无任何误报；心跳显示两条路径计数都在增长。**尚未验证**：真实睡眠唤醒循环（需重启后专门测）；探针判死路径的逻辑有单元测试覆盖，但「钩子真的被摘掉后自动恢复」未做端到端实测（没有不杀进程就能摘掉指定钩子的手段）。
+- **线程模型**：看门狗的窗口/计时器/Raw Input 全部绑定钩子线程；`NoteHookEvent()` 在钩子回调里只做一次 DWORD 写入加计数（零分配零锁）；App 线程只能通过 `PostThreadMessage` 转投信号。
+
 ### 本机显示环境与 DPI（实测，2026-10-10）
 
 - 主显示器 **2560×1600 物理像素，DPI 144（150% 缩放）**，单显示器，虚拟桌面与主屏一致。

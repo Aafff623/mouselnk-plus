@@ -62,6 +62,11 @@ public:
             MESSAGE_HANDLER(WM_DESTROY, OnDestroy)
             MESSAGE_HANDLER(WM_ENDSESSION, OnEndSession)
             MESSAGE_HANDLER(WM_TIMER, OnTimer)
+            // 看门狗的三路恢复信号在这里汇聚（T-0033）：
+            // WM_POWERBROADCAST 收电源唤醒与 GUID_CONSOLE_DISPLAY_STATE 显示状态，
+            // WM_WTSSESSION_CHANGE 收会话锁定/解锁（需 WTSRegisterSessionNotification）。
+            MESSAGE_HANDLER(WM_POWERBROADCAST, OnPowerBroadcast)
+            MESSAGE_HANDLER(WM_WTSSESSION_CHANGE, OnSessionChange)
             // TaskbarCreated 是运行时注册的消息，用成员变量作为消息 ID。
             // 注意 BEGIN_MSG_MAP 自身就会定义 ProcessWindowMessage，不要再自己声明。
             MESSAGE_HANDLER(taskbarCreatedMessage, OnTaskbarCreated)
@@ -79,6 +84,8 @@ public:
         LRESULT OnDestroy(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnEndSession(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnTimer(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnPowerBroadcast(UINT, WPARAM, LPARAM, BOOL&);
+        LRESULT OnSessionChange(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnGestureDone(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnReinjectClick(UINT, WPARAM, LPARAM, BOOL&);
         LRESULT OnTracePointMsg(UINT, WPARAM, LPARAM, BOOL&);
@@ -90,6 +97,11 @@ public:
 
         // RegisterWindowMessageW(L"TaskbarCreated")：Explorer 重启后会广播。
         UINT taskbarCreatedMessage = 0;
+
+        // RegisterPowerSettingNotification 返回的注册句柄。注意：
+        // UnregisterPowerSettingNotification 要的是这个句柄，不是窗口句柄
+        // （传窗口句柄会在 powrprof.dll 里崩溃，实测每次退出都崩）。
+        HPOWERNOTIFY powerNotify = nullptr;
     };
 
     CMainWindow& Window() { return m_window; }

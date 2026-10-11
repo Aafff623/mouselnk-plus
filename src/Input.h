@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "GestureState.h"
+#include "Watchdog.h"
 
 // 全局低级鼠标钩子（作者规格「一、3 输入监听」）。
 //
@@ -52,6 +53,14 @@ public:
     // 补发计数（诊断用：补发过多说明 StartDistance 或超时设置不合理）
     unsigned int reinjectedCount() const { return m_reinjected.load(); }
 
+    // 看门狗重装计数（诊断用：持续增长说明环境在反复摘钩子，见日志）
+    unsigned int reinstallCount() const { return m_watchdog.reinstallCount(); }
+
+    // 由 App 线程调用：恢复信号（电源唤醒 / 显示状态 / 会话解锁三路汇聚后转来）。
+    // 内部只向钩子线程投递消息，不直接碰钩子线程状态。
+    void NotifyResumeSignal() { m_watchdog.NotifyResumeSignal(); }
+    void NotifySessionLocked(bool locked) { m_watchdog.NotifySessionLocked(locked); }
+
 private:
     Hook() = default;
     Hook(const Hook&) = delete;
@@ -62,10 +71,15 @@ private:
 
     DWORD ThreadMain();
     void  ApplyPendingPause();     // 只能由钩子线程调用
+    void  ReinstallHook();         // 只能由钩子线程调用（看门狗的重装动作）
 
     HWND    m_notifyWindow = nullptr;
     HANDLE  m_thread = nullptr;
     DWORD   m_threadId = 0;
+
+    // 钩子句柄。放成员而不是线程局部：看门狗重装时要换掉它。
+    HHOOK   m_hook = nullptr;
+    Watchdog m_watchdog;
 
     std::atomic<bool>         m_installed{false};
     std::atomic<bool>         m_running{false};
