@@ -204,7 +204,7 @@ void ReportPending(const wchar_t* feature, const wchar_t* task) {
     std::wstring text = feature;
     text += L"尚未实现。\n\n计划任务：";
     text += task;
-    text += L"\n（见 TODO.md）";
+    text += L"\n（见项目 Issue 跟踪）";
     ::MessageBoxW(nullptr, text.c_str(), kAppTitle, MB_OK | MB_ICONINFORMATION);
 }
 

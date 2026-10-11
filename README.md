@@ -21,10 +21,10 @@ Windows 桌面鼠标手势 / 鼠标增强工具。项目名 `mouselnk-plus`（�
 
 ## Start here
 
-1. `TODO.md` —— 当前任务与进度，接手时先看这个
-2. `docs/execution-plan.md` —— **执行总纲**：工作原则、技术选型结论、标准流程、阶段任务地图、验证矩阵与风险登记
-3. `AGENTS.md` —— 项目规则、依赖与技术选型纪律、复现的法律与工程边界
-4. `CONTEXT.md` —— 已核实的领域事实、术语、本机取证证据、硬约束与已知失效模式
+1. [GitHub Issues](https://github.com/Aafff623/mouselnk-plus/issues) —— 当前任务、决策票与进度；接手时先看这个（跟踪约定见 `docs/agents/issue-tracker.md`）
+2. `AGENTS.md` —— 项目规则、依赖与技术选型纪律、复现的法律与工程边界
+3. `CONTEXT.md` —— 已核实的领域事实、术语、本机取证证据、硬约束与已知失效模式
+4. `CLAUDE.md` / `docs/agents/` —— Agent 技能入口：Issue 跟踪位置、triage 标签词表、领域文档消费规则
 5. `temp/AGENTS.md` —— 往 `temp/` 放临时材料之前先读
 
 ## Development
@@ -77,7 +77,7 @@ cmake --build build-vs --config Release
 - **浮层**：GDI+ 分层窗口，只覆盖轨迹包围盒，支持线宽/颜色/箭头与「成功 / 无匹配 / 无动作」三种反馈。
 - **动作**：SendKeys、窗口操作、启动程序、剪贴板、延时、Internal 等基础动作，动作链在后台线程串行执行；未实现的动作会明确报错。
 
-设置界面仍是占位（点「设置」会提示计划任务）；应用规则、热键、边缘滚动、热角、截图/贴图/OCR 等属于后续阶段 —— 进度见 `TODO.md`。
+设置界面仍是占位（点「设置」会提示计划任务）；应用规则、热键、边缘滚动、热角、截图/贴图/OCR 等属于后续阶段 —— 进度见 [Issues](https://github.com/Aafff623/mouselnk-plus/issues)。
 
 ## 构建与测试
 

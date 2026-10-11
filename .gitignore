@@ -1,7 +1,5 @@
-# TTA local workspace payloads
+# TTA local workspace payloads（整个 temp/ 树均不入库，含边界说明文档——owner 决定 2026-10-11）
 /temp/*
-!/temp/README.md
-!/temp/AGENTS.md
 
 # Project-local MCP configuration; never commit runtime endpoints or credentials
 /.agents/mcp.json

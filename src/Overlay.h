@@ -10,7 +10,7 @@
 // 实现要点：
 //   - 分层窗口（WS_EX_LAYERED + UpdateLayeredWindow），窗口**只覆盖轨迹的包围盒**
 //     而不是整个虚拟桌面 —— 分层窗口的内存随面积走，全屏尺寸的 DIB 在多屏 4K 下
-//     轻易就是几十 MB，而轨迹本身只有几百像素（见 docs/execution-plan.md 的风险登记）。
+//     轻易就是几十 MB，而轨迹本身只有几百像素（缓冲区上限约束见 Issue 跟踪的阶段 4 任务）。
 //   - 不抢焦点、不进任务栏、不阻挡鼠标：WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT。
 //   - 按需重绘：只有点集变化时才重画，不跑渲染循环。
 //   - 坐标全程用**物理像素**（进程已声明 PerMonitorV2），避免高 DPI 下轨迹偏移。

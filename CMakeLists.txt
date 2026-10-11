@@ -102,7 +102,7 @@ set_property(SOURCE src/app.rc APPEND PROPERTY OBJECT_DEPENDS
 # ---- 自动化测试（作者规格「十七、验证与交付」）----
 #
 # 测试 exe 只在开发/CI 构建，不进发行物，因此与「单文件 / 静态 CRT」的交付约束无关。
-# doctest 是单头文件（MIT，见 THIRD-PARTY-NOTICES.md），选型依据见 docs/execution-plan.md §2.2。
+# doctest 是单头文件（MIT，见 THIRD-PARTY-NOTICES.md），选型依据见 docs/adr/0003-dependency-strategy.md 附录。
 enable_testing()
 
 add_executable(mouselnk-plus-tests
